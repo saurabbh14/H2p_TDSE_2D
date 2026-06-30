@@ -19,6 +19,7 @@ module continuum_1d_mod
         procedure :: initialize          ! FFTW setup + kprop_full generation
         procedure :: apply               ! Absorber mask + free propagation of absorbed part
         procedure :: forward_fft         ! Forward FFT of a 1D array (for post-prop analysis)
+        procedure :: finalize            ! Clean up FFTW plans, memory, and kprop_full
     end type continuum_1d_type
 
 contains
@@ -120,5 +121,18 @@ contains
         psi_out_col(:) = this%psi_out(:) / sqrt(dble(NR))
 
     end subroutine forward_fft
+
+    !> Clean up FFTW plans, memory, and kinetic propagator
+    subroutine finalize(this)
+        use FFTW3
+        class(continuum_1d_type), intent(inout) :: this
+
+        call fftw_destroy_plan(this%planF)
+        call fftw_destroy_plan(this%planB)
+        call fftw_free(this%p_in)
+        call fftw_free(this%p_out)
+        if (allocated(this%kprop_full)) deallocate(this%kprop_full)
+
+    end subroutine finalize
 
 end module continuum_1d_mod

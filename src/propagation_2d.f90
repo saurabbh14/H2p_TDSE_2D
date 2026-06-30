@@ -338,7 +338,6 @@ contains
     subroutine time_evolution(this, E, A, propagator_method)
         use global_vars, only: NR, time, Nt, dp, dR, R, omp_nthreads, pot, x
         use data_au, only: au2fs
-        use FFTW3
         use omp_lib
         class(time_prop_2d), intent(inout) :: this
         type(split_operator_2d_type) :: split_operator_2d
@@ -490,24 +489,14 @@ contains
         close(this%dens_x_tk)
         close(this%field_2d_tk)
 
-        ! Destroy FFTW plans and free memory based on propagator method
+        ! Destroy FFTW plans and free memory using encapsulated finalize
         select case(trim(adjustl(propagator_method)))
         case("split_operator")
-            call fftw_destroy_plan(split_operator_2d%planF)
-            call fftw_destroy_plan(split_operator_2d%planB)
-            call fftw_free(split_operator_2d%p_in)
-            call fftw_free(split_operator_2d%p_out)
+            call split_operator_2d%finalize()
         case("rk4")
-            call fftw_destroy_plan(rk4_operator_2d%planF)
-            call fftw_destroy_plan(rk4_operator_2d%planB)
-            call fftw_free(rk4_operator_2d%p_in)
-            call fftw_free(rk4_operator_2d%p_out)
-            deallocate(rk4_operator_2d%kin_energy)
+            call rk4_operator_2d%finalize()
         case default
-            call fftw_destroy_plan(split_operator_2d%planF)
-            call fftw_destroy_plan(split_operator_2d%planB)
-            call fftw_free(split_operator_2d%p_in)
-            call fftw_free(split_operator_2d%p_out)
+            call split_operator_2d%finalize()
         end select
     end subroutine time_evolution
 

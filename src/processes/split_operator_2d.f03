@@ -25,6 +25,7 @@ module split_operator_2d_mod
         procedure :: kprop_gen_vel       ! Generate velocity-guage kinetic propagators 
         procedure :: vprop_gen_vel       ! Generate velocity-guage potential propagators
         procedure :: split_operator_step      ! Apply split-operator step
+        procedure :: finalize             ! Clean up FFTW resources
     end type split_operator_2d_type
 
 contains
@@ -158,5 +159,17 @@ contains
         end select
 
     end subroutine split_operator_step
+
+    !> Clean up FFTW plans and memory
+    subroutine finalize(this)
+        use FFTW3
+        class(split_operator_2d_type), intent(inout) :: this
+
+        call fftw_destroy_plan(this%planF)
+        call fftw_destroy_plan(this%planB)
+        call fftw_free(this%p_in)
+        call fftw_free(this%p_out)
+
+    end subroutine finalize
 
 end module split_operator_2d_mod

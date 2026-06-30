@@ -383,7 +383,6 @@ contains
             & dp, dR, guess_vstates, dt, Vstates, R, pR, omp_nthreads, adb
         use data_au, only: au2fs
         use blas_interfaces_module, only: zgemv
-        use FFTW3
         use omp_lib
         class(time_prop), intent(inout) :: this
         type(split_operator_type) :: split_operator
@@ -577,31 +576,16 @@ contains
         deallocate(norm_SE_outR)
         deallocate(tout)
         deallocate(vib_pop)
-        ! Destroy FFTW plans and free memory
-        ! Continuum/absorber (always)
-        call fftw_destroy_plan(continuum_1d%planF)
-        call fftw_destroy_plan(continuum_1d%planB)
-        call fftw_free(continuum_1d%p_in)
-        call fftw_free(continuum_1d%p_out)
+        ! Destroy FFTW plans and free memory 
+        call continuum_1d%finalize()
 
-        ! Propagator-specific cleanup
         select case(trim(adjustl(propagator_method)))
         case("split_operator")
-            call fftw_destroy_plan(split_operator%planF)
-            call fftw_destroy_plan(split_operator%planB)
-            call fftw_free(split_operator%p_in)
-            call fftw_free(split_operator%p_out)
+            call split_operator%finalize()
         case("rk4")
-            call fftw_destroy_plan(rk4_operator%planF)
-            call fftw_destroy_plan(rk4_operator%planB)
-            call fftw_free(rk4_operator%p_in)
-            call fftw_free(rk4_operator%p_out)
-            deallocate(rk4_operator%kin_energy)
+            call rk4_operator%finalize()
         case default
-            call fftw_destroy_plan(split_operator%planF)
-            call fftw_destroy_plan(split_operator%planB)
-            call fftw_free(split_operator%p_in)
-            call fftw_free(split_operator%p_out)
+            call split_operator%finalize()
         end select
         ! Close all files
         close(this%norm_1d_tk)
@@ -809,10 +793,7 @@ contains
         close(momt_spectra_tk)
         close(KER_spectra_tk)
         ! Destroy FFTW plans and free memory
-        call fftw_destroy_plan(continuum_1d%planF)
-        call fftw_destroy_plan(continuum_1d%planB)
-        call fftw_free(continuum_1d%p_in)
-        call fftw_free(continuum_1d%p_out)
+        call continuum_1d%finalize()
         
     end subroutine post_prop_analysis
 

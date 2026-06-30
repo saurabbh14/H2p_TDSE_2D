@@ -19,6 +19,7 @@ module rk4_operator_mod
         procedure :: kin_energy_gen      ! Pre-compute kinetic energy factor
         procedure :: rhs_1d              ! Evaluate RHS: d(psi)/dt = -i*H*psi
         procedure :: rk4_step            ! Perform one full RK4 time step
+        procedure :: finalize            ! Clean up FFTW resources and kinetic energy array
     end type rk4_operator_type
 
 contains
@@ -180,5 +181,18 @@ contains
         end do
 
     end subroutine pulse_direct
+
+    !> Clean up FFTW plans, memory, and kinetic energy array
+    subroutine finalize(this)
+        use FFTW3
+        class(rk4_operator_type), intent(inout) :: this
+
+        call fftw_destroy_plan(this%planF)
+        call fftw_destroy_plan(this%planB)
+        call fftw_free(this%p_in)
+        call fftw_free(this%p_out)
+        if (allocated(this%kin_energy)) deallocate(this%kin_energy)
+
+    end subroutine finalize
 
 end module rk4_operator_mod
