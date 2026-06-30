@@ -1,0 +1,4 @@
+builddir/
+output_data/
+*.out
+.vscode
