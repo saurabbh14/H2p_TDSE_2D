@@ -2,14 +2,14 @@
 
 **Two-Dimensional Time-Dependent Schrödinger Equation Solver for H₂⁺**
 
-A Fortran-based code for solving the time-dependent Schrödinger equation (TDSE) for the H₂⁺ molecular ion in one and two dimensions (internuclear separation R + electron coordinate x). The code handles nuclear and electronic dynamics under the Born-Oppenheimer framework in the presence of intense, ultrafast laser fields.
+A Fortran-based code for solving the time-dependent Schrödinger equation (TDSE) for the H₂⁺ molecular ion in one and two dimensions (internuclear separation R + electron coordinate x). The code handles nuclear and electronic dynamics under the non-Born-Oppenheimer framework in the presence of intense, ultrafast laser fields.
 
 ---
 
 ## Capabilities / Features
 
 ### Dimensionality
-- **1D Propagation** — Nuclear dynamics only (R coordinate), with multi-state electronic coupling
+- **1D Propagation** — Nuclear dynamics only (R coordinate), with multi-state electronic coupling (Born-Oppenheimer)
 - **2D Propagation** — Nuclear + electronic dynamics (R + x coordinates), with full 2D wavefunction evolution
 
 ### Electronic Structure
@@ -245,9 +245,3 @@ If you use this code in your research, please cite the relevant publications. *[
 ## License
 
 This project is licensed under the MIT License — see the [LICENSE](LICENSE) file for details.
-
----
-
-## Author
-
-Saurabh Bhatta
