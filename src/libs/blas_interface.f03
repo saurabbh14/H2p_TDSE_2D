@@ -51,7 +51,7 @@ module blas_interfaces_module
             complex(wp), dimension(*), intent(out):: y
             integer, intent(in):: incy
         end subroutine zgemv
-  
+                
         subroutine dgemv (trans, m, n, alpha,a,lda,x,incx,beta,y,incy)
             import wp
             character*1, intent(in):: trans

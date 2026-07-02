@@ -15,7 +15,7 @@ module InputVars
     integer:: Nstates                      ! number of electronic BO states
     character(200):: sc_kind         ! "on_grid" | "static" (select potential source)
     character(2000):: sc_params     ! filename for soft-core parameters if sc_kind = "on_grid"
-    character(2000):: CalcMode = "Lab"      ! potential frame of reference Lab or KH
+    character(2000):: CalcMode = "Lab"      ! "Lab" | "KH" (cycle-avg) | "KH_td" (time-dep KH)
     real(dp):: alpha0                     ! alpha0 for KH potential (in Angstrom)
 
     ! vibrational states 

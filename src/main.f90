@@ -72,9 +72,9 @@ program TDSE_main
   print*
   print*, "Time dependent calcuations"
 
-  call prop%propagation_1D(pulse%El, pulse%Al, propagator_method)
+!  call prop%propagation_1D(pulse%El, pulse%Al, propagator_method)
 
-!  call prop_2d%propagation_2D(pulse%El, pulse%Al)
+  call prop_2d%propagation_2D(pulse%El, pulse%Al, pulse%alpha_t, propagator_method)
 !
   ! Clean up allocated arrays and pulse internals
   deallocate (adb, mu_all, chi0)

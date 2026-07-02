@@ -5,7 +5,7 @@ module setpot_mod
         & Pot, zeff, alpha2, alpha0, CalcMode, dt
     implicit none
     private
-    public :: build_2d_potential
+    public :: build_2d_potential, build_kh_potential_at_time
 contains
     subroutine build_2d_potential()
         integer :: I, J, pot_unit, ionic_unit
@@ -81,6 +81,31 @@ contains
 
         deallocate(v12, v1e, v2e)
     end subroutine build_2d_potential
+
+    subroutine build_kh_potential_at_time(pot_KH, alpha_val)
+        real(dp), intent(out) :: pot_KH(NR, Nx)
+        real(dp), intent(in)  :: alpha_val
+        integer :: I, J
+        real(dp), allocatable :: v12(:), v1e(:), v2e(:)
+        real(dp), allocatable :: dx1(:), dx2(:)
+
+        allocate(v12(NR), v1e(NR), v2e(NR))
+        allocate(dx1(NR), dx2(NR))
+
+        ! Nuclear repulsion (unchanged in KH frame)
+        v12(:) = 1._dp / abs(R(:))
+
+        do J = 1, Nx
+            ! Electronic coordinate shifted by quiver displacement alpha_val
+            dx1(:) = (x(J) + alpha_val) - mn1 * R(:)
+            dx2(:) = (x(J) + alpha_val) + mn2 * R(:)
+            v1e(:) = -zeff(:) / sqrt(dx1(:) * dx1(:) + alpha2(:))
+            v2e(:) = -zeff(:) / sqrt(dx2(:) * dx2(:) + alpha2(:))
+            pot_KH(:, J) = v12(:) + v1e(:) + v2e(:)
+        end do
+
+        deallocate(v12, v1e, v2e, dx1, dx2)
+    end subroutine build_kh_potential_at_time
 end module setpot_mod
         
             

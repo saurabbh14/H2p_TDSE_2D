@@ -436,9 +436,9 @@ contains
         if (omp_nthreads > 0 .and. omp_nthreads < max_num_threads) then
             continue
         else
-            omp_nthreads = max_num_threads
+            omp_nthreads = max_num_threads/2
         endif       
-        print*, "Number of openmp threads (if not speciefied then maximum available):", omp_nthreads
+        print*, "Number of openmp threads (if not speciefied then half of the maximum available):", omp_nthreads
 
         call OMP_SET_NUM_THREADS(omp_nthreads) 
         print*, "Done  setting up Openmp threads."
@@ -501,14 +501,15 @@ contains
             !=============================================================
             case("rk4")
             !=============================================================
-                ! Compute E_field at halftime: E(t + dt/2)
-                ! For simplicity, linearly interpolate between E(k) and E(k+1)
+                ! Compute E_field at halftime and next step
+                ! k1 uses E(k), k2/k3 use E_half, k4 uses E_next
                 if (k < Nt) then
                     E_half = 0.5_dp * (E(k) + E(k+1))
+                    call rk4_operator%rk4_step(this%psi_ges, dt, E(k), E_half, E(k+1), mu_all, adb)
                 else
-                    E_half = E(k)  ! last step, use E(k)
+                    E_half = E(k)  ! last step, use E(k) for all
+                    call rk4_operator%rk4_step(this%psi_ges, dt, E(k), E_half, E(k), mu_all, adb)
                 end if
-                call rk4_operator%rk4_step(this%psi_ges, dt, E(k), E_half, mu_all, adb)
 
             end select
 
@@ -576,6 +577,10 @@ contains
         deallocate(norm_SE_outR)
         deallocate(tout)
         deallocate(vib_pop)
+
+        ! Set back the OMP env to normal
+        call OMP_SET_NUM_THREADS(omp_get_max_threads()) 
+
         ! Destroy FFTW plans and free memory 
         call continuum_1d%finalize()
 

@@ -125,13 +125,14 @@ contains
     !! k2 = rhs(psi + k1*dt/2, t + dt/2)
     !! k3 = rhs(psi + k2*dt/2, t + dt/2)
     !! k4 = rhs(psi + k3*dt, t + dt)
-    subroutine rk4_step(this, psi, dt, E_field_now, E_field_half, mu_all, adb)
+    subroutine rk4_step(this, psi, dt, E_field_now, E_field_half, E_field_next, mu_all, adb)
         use global_vars, only: NR, Nstates
         class(rk4_operator_type), intent(inout) :: this
         complex(dp), intent(inout) :: psi(NR, Nstates)
         real(dp), intent(in)      :: dt
-        real(dp), intent(in)      :: E_field_now   ! E(t)
-        real(dp), intent(in)      :: E_field_half  ! E(t + dt/2)
+        real(dp), intent(in)      :: E_field_now    ! E(t)
+        real(dp), intent(in)      :: E_field_half   ! E(t + dt/2)
+        real(dp), intent(in)      :: E_field_next   ! E(t + dt)
         real(dp), intent(in)      :: mu_all(Nstates, Nstates, NR)
         real(dp), intent(in)      :: adb(NR, Nstates)
 
@@ -142,20 +143,20 @@ contains
         allocate(k3(NR, Nstates), k4(NR, Nstates))
         allocate(psi_tmp(NR, Nstates))
 
-        ! k1 = rhs(psi, t)
+        ! k1 = rhs(psi, t)        using E(t)
         call this%rhs_1d(psi, k1, E_field_now, mu_all, adb)
 
-        ! k2 = rhs(psi + k1*dt/2, t + dt/2)
+        ! k2 = rhs(psi + k1*dt/2, t + dt/2)   using E(t+dt/2)
         psi_tmp = psi + k1 * (0.5_dp * dt)
         call this%rhs_1d(psi_tmp, k2, E_field_half, mu_all, adb)
 
-        ! k3 = rhs(psi + k2*dt/2, t + dt/2)
+        ! k3 = rhs(psi + k2*dt/2, t + dt/2)   using E(t+dt/2)
         psi_tmp = psi + k2 * (0.5_dp * dt)
         call this%rhs_1d(psi_tmp, k3, E_field_half, mu_all, adb)
 
-        ! k4 = rhs(psi + k3*dt, t + dt)
+        ! k4 = rhs(psi + k3*dt,   t + dt)     using E(t+dt)
         psi_tmp = psi + k3 * dt
-        call this%rhs_1d(psi_tmp, k4, E_field_now, mu_all, adb)
+        call this%rhs_1d(psi_tmp, k4, E_field_next, mu_all, adb)
 
         ! Update: psi_new = psi + (k1 + 2*k2 + 2*k3 + k4) * dt / 6
         psi = psi + (k1 + 2._dp * k2 + 2._dp * k3 + k4) * (dt / 6._dp)

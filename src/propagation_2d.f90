@@ -6,6 +6,7 @@ module propagation2d_mod
     use data_au, only: au2eV
     use split_operator_2d_mod, only: split_operator_2d_type
     use rk4_operator_2d_mod, only: rk4_operator_2d_type
+    use setpot_mod, only: build_kh_potential_at_time
     use FFTW3
     use omp_lib
     implicit none
@@ -72,9 +73,9 @@ module propagation2d_mod
 
 contains
 
-    subroutine propagation_2D(this, E2, A, propagator_method)
+    subroutine propagation_2D(this, E2, A, alpha_t, propagator_method)
         class(time_prop_2d), intent(inout) :: this
-        real(dp), intent(in) :: E2(:), A(:)
+        real(dp), intent(in) :: E2(:), A(:), alpha_t(:)
         character(*), intent(in) :: propagator_method
 
         if (.not. this%initialized) call this%initialize()
@@ -88,7 +89,7 @@ contains
         call this%absorber_gen()
         
         ! Main Loop
-        call this%time_evolution(E2, A, propagator_method)
+        call this%time_evolution(E2, A, alpha_t, propagator_method)
         
         ! Teardown & Analysis
         !call this%post_prop_analysis()
@@ -335,8 +336,8 @@ contains
         ! Post-propagation output is currently handled inside propagation_2D_impl
     end subroutine write_output_files
 
-    subroutine time_evolution(this, E, A, propagator_method)
-        use global_vars, only: NR, time, Nt, dp, dR, R, omp_nthreads, pot, x
+    subroutine time_evolution(this, E, A, alpha_t, propagator_method)
+        use global_vars, only: NR, time, Nt, dp, dR, R, omp_nthreads, pot, x, CalcMode
         use data_au, only: au2fs
         use omp_lib
         class(time_prop_2d), intent(inout) :: this
@@ -347,7 +348,11 @@ contains
         real(dp) :: evR, evx, epx, epR
         real(dp) :: norm
         real(dp) :: E(Nt), A(Nt)
+        real(dp) :: alpha_t(Nt)
         real(dp) :: E_half, A_half       ! fields at t + dt/2 for RK4
+        real(dp) :: alpha_half           ! quiver disp at t + dt/2 for RK4-KH
+        real(dp), allocatable :: pot_kh(:,:), pot_kh_half(:,:)
+        real(dp) :: E_zero, A_zero       ! zero fields for KH mode
         character(*), intent(in) :: propagator_method
         character(20) :: in_xR, out_x, out_R, out_xR
         complex(dp), allocatable :: psi_out_R_tmp(:,:), psi_out_x_tmp(:,:)
@@ -371,19 +376,6 @@ contains
             call split_operator_2d%split_operator_initialize()
         end select
 
-        max_num_threads = omp_get_max_threads()
-        print*
-        print*, "Setting openmp threads for matrix operations ..."
-        if (omp_nthreads > 0 .and. omp_nthreads < max_num_threads) then
-            continue
-        else
-            omp_nthreads = max_num_threads
-        endif       
-        print*, "Number of openmp threads (if not speciefied then maximum available):", omp_nthreads
-
-        call OMP_SET_NUM_THREADS(omp_nthreads) 
-        print*, "Done  setting up Openmp threads."
-
         ! Defining simulation regions
         write(in_xR, '(a)') "inner-xR"
         write(out_x, '(a)') "outer-x"
@@ -393,6 +385,16 @@ contains
         print*
         print*,'2D time evolution...'
         print*
+
+        ! Allocate KH potential arrays if using time-dependent KH mode
+        if (trim(CalcMode) == "KH_td") then
+            allocate(pot_kh(NR, Nx))
+            if (trim(adjustl(propagator_method)) == "rk4") then
+                allocate(pot_kh_half(NR, Nx))
+            end if
+            E_zero = 0._dp
+            A_zero = 0._dp
+        end if
 
         timeloop: do k = 1, Nt
             if (mod(k,1000) .eq. 0 .and. time(k)*au2fs .lt. 100._dp) then
@@ -406,33 +408,65 @@ contains
             epR = 0.d0
             epx = 0.d0
 
-            select case(trim(adjustl(propagator_method)))
-            !=============================================================
-            case("split_operator")
-            !=============================================================
-                call split_operator_2d%vprop_gen_len(E(k), A(k))
-                call split_operator_2d%split_operator_step(this%psi, in_xR)
+            !====================================================================
+            ! KH time-dependent mode: compute instantaneous KH potential
+            !====================================================================
+            if (trim(CalcMode) == "KH_td") then
+                select case(trim(adjustl(propagator_method)))
+                case("split_operator")
+                    call build_kh_potential_at_time(pot_kh, alpha_t(k))
+                    call split_operator_2d%vprop_gen_kh(pot_kh)
+                    call split_operator_2d%split_operator_step(this%psi, in_xR)
+                case("rk4")
+                    call build_kh_potential_at_time(pot_kh, alpha_t(k))
+                    if (k < Nt) then
+                        alpha_half = 0.5_dp * (alpha_t(k) + alpha_t(k+1))
+                    else
+                        alpha_half = alpha_t(k)
+                    end if
+                    call build_kh_potential_at_time(pot_kh_half, alpha_half)
+                    call rk4_operator_2d%rk4_step_kh(this%psi, dt, pot_kh, pot_kh_half)
+                case default
+                    call build_kh_potential_at_time(pot_kh, alpha_t(k))
+                    call split_operator_2d%vprop_gen_kh(pot_kh)
+                    call split_operator_2d%split_operator_step(this%psi, in_xR)
+                end select
+            else
+                !================================================================
+                ! Original Lab-frame propagation
+                !================================================================
+                select case(trim(adjustl(propagator_method)))
+                !=============================================================
+                case("split_operator")
+                !=============================================================
+                    call split_operator_2d%vprop_gen_len(E(k), A(k))
+                    call split_operator_2d%split_operator_step(this%psi, in_xR)
 
-            !=============================================================
-            case("rk4")
-            !=============================================================
-                ! Compute fields at halftime: E(t + dt/2), A(t + dt/2)
-                if (k < Nt) then
-                    E_half = 0.5_dp * (E(k) + E(k+1))
-                    A_half = 0.5_dp * (A(k) + A(k+1))
-                else
-                    E_half = E(k)
-                    A_half = A(k)
-                end if
-                call rk4_operator_2d%rk4_step(this%psi, dt, E(k), E_half, A(k), A_half, pot)
+                !=============================================================
+                case("rk4")
+                !=============================================================
+                    ! Compute fields at halftime: E(t+dt/2), A(t+dt/2)
+                    ! and next step: E(t+dt), A(t+dt) for the k4 evaluation
+                    if (k < Nt) then
+                        E_half = 0.5_dp * (E(k) + E(k+1))
+                        A_half = 0.5_dp * (A(k) + A(k+1))
+                        call rk4_operator_2d%rk4_step(this%psi, dt, E(k), E_half, E(k+1), &
+                            & A(k), A_half, A(k+1), pot)
+                    else
+                        E_half = E(k)
+                        A_half = A(k)
+                        call rk4_operator_2d%rk4_step(this%psi, dt, E(k), E_half, E(k), &
+                            & A(k), A_half, A(k), pot)
+                    end if
 
-            !=============================================================
-            case default
-            !=============================================================
-                call split_operator_2d%vprop_gen_len(E(k), A(k))
-                call split_operator_2d%split_operator_step(this%psi, in_xR)
+                !=============================================================
+                case default
+                !=============================================================
+                    call split_operator_2d%vprop_gen_len(E(k), A(k))
+                    call split_operator_2d%split_operator_step(this%psi, in_xR)
 
-            end select
+                end select
+            end if
 
             call density(this%psi, this%idensR, this%idensx)
             call integ_2D(this%psi, norm)
@@ -482,6 +516,8 @@ contains
         end do timeloop
 
         deallocate(psi_out_R_tmp, psi_out_x_tmp, psi_out_xR_tmp)
+        if (allocated(pot_kh)) deallocate(pot_kh)
+        if (allocated(pot_kh_half)) deallocate(pot_kh_half)
         close(this%avgR_2d_tk)
         close(this%avgx_2d_tk)
         close(this%norm_2d_tk)

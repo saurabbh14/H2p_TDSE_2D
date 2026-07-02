@@ -20,6 +20,7 @@ module rk4_operator_2d_mod
         procedure :: kin_energy_gen      ! Pre-compute kinetic energy factor
         procedure :: rhs_2d              ! Evaluate RHS: d(psi)/dt = -i*H*psi
         procedure :: rk4_step            ! Perform one full RK4 time step
+        procedure :: rk4_step_kh         ! Perform one full RK4 time step in KH gauge
         procedure :: finalize            ! Clean up FFTW resources and kinetic energy array
     end type rk4_operator_2d_type
 
@@ -121,13 +122,13 @@ contains
     !! k2 = rhs(psi + k1*dt/2, t + dt/2)
     !! k3 = rhs(psi + k2*dt/2, t + dt/2)
     !! k4 = rhs(psi + k3*dt, t + dt)
-    subroutine rk4_step(this, psi, dt, E_now, E_half, A_now, A_half, pot)
+    subroutine rk4_step(this, psi, dt, E_now, E_half, E_next, A_now, A_half, A_next, pot)
         use global_vars, only: NR, Nx
         class(rk4_operator_2d_type), intent(inout) :: this
         complex(dp), intent(inout) :: psi(NR, Nx)
         real(dp), intent(in)      :: dt
-        real(dp), intent(in)      :: E_now, E_half   ! E(t) and E(t+dt/2)
-        real(dp), intent(in)      :: A_now, A_half   ! A(t) and A(t+dt/2)
+        real(dp), intent(in)      :: E_now, E_half, E_next  ! E(t), E(t+dt/2), E(t+dt)
+        real(dp), intent(in)      :: A_now, A_half, A_next  ! A(t), A(t+dt/2), A(t+dt)
         real(dp), intent(in)      :: pot(NR, Nx)
 
         complex(dp), allocatable :: k1(:,:), k2(:,:), k3(:,:), k4(:,:)
@@ -136,20 +137,20 @@ contains
         allocate(k1(NR, Nx), k2(NR, Nx), k3(NR, Nx), k4(NR, Nx))
         allocate(psi_tmp(NR, Nx))
 
-        ! k1 = rhs(psi, t)
+        ! k1 = rhs(psi, t)              using E(t), A(t)
         call this%rhs_2d(psi, k1, E_now, A_now, pot)
 
-        ! k2 = rhs(psi + k1*dt/2, t + dt/2)
+        ! k2 = rhs(psi + k1*dt/2, t+dt/2) using E(t+dt/2), A(t+dt/2)
         psi_tmp = psi + k1 * (0.5_dp * dt)
         call this%rhs_2d(psi_tmp, k2, E_half, A_half, pot)
 
-        ! k3 = rhs(psi + k2*dt/2, t + dt/2)
+        ! k3 = rhs(psi + k2*dt/2, t+dt/2) using E(t+dt/2), A(t+dt/2)
         psi_tmp = psi + k2 * (0.5_dp * dt)
         call this%rhs_2d(psi_tmp, k3, E_half, A_half, pot)
 
-        ! k4 = rhs(psi + k3*dt, t + dt)
+        ! k4 = rhs(psi + k3*dt,   t+dt)   using E(t+dt), A(t+dt)
         psi_tmp = psi + k3 * dt
-        call this%rhs_2d(psi_tmp, k4, E_now, A_now, pot)
+        call this%rhs_2d(psi_tmp, k4, E_next, A_next, pot)
 
         ! Update: psi_new = psi + (k1 + 2*k2 + 2*k3 + k4) * dt / 6
         psi = psi + (k1 + 2._dp * k2 + 2._dp * k3 + k4) * (dt / 6._dp)
@@ -157,6 +158,48 @@ contains
         deallocate(k1, k2, k3, k4, psi_tmp)
 
     end subroutine rk4_step
+
+    !> Perform one full RK4 time step in KH gauge
+    !! Uses time-dependent KH potential (laser coupling already in potential, no E-field term)
+    !! pot_now  = V_KH(R, x, t)
+    !! pot_half = V_KH(R, x, t + dt/2)
+    subroutine rk4_step_kh(this, psi, dt, pot_now, pot_half)
+        use global_vars, only: NR, Nx
+        class(rk4_operator_2d_type), intent(inout) :: this
+        complex(dp), intent(inout) :: psi(NR, Nx)
+        real(dp), intent(in)      :: dt
+        real(dp), intent(in)      :: pot_now(NR, Nx), pot_half(NR, Nx)
+
+        complex(dp), allocatable :: k1(:,:), k2(:,:), k3(:,:), k4(:,:)
+        complex(dp), allocatable :: psi_tmp(:,:)
+
+        ! E_field = 0 and A_field = 0 since laser coupling is in the potential
+        real(dp), parameter :: E_zero = 0._dp, A_zero = 0._dp
+
+        allocate(k1(NR, Nx), k2(NR, Nx), k3(NR, Nx), k4(NR, Nx))
+        allocate(psi_tmp(NR, Nx))
+
+        ! k1 = rhs(psi, t) with pot_now
+        call this%rhs_2d(psi, k1, E_zero, A_zero, pot_now)
+
+        ! k2 = rhs(psi + k1*dt/2, t + dt/2) with pot_half
+        psi_tmp = psi + k1 * (0.5_dp * dt)
+        call this%rhs_2d(psi_tmp, k2, E_zero, A_zero, pot_half)
+
+        ! k3 = rhs(psi + k2*dt/2, t + dt/2) with pot_half
+        psi_tmp = psi + k2 * (0.5_dp * dt)
+        call this%rhs_2d(psi_tmp, k3, E_zero, A_zero, pot_half)
+
+        ! k4 = rhs(psi + k3*dt, t + dt) with pot_now
+        psi_tmp = psi + k3 * dt
+        call this%rhs_2d(psi_tmp, k4, E_zero, A_zero, pot_now)
+
+        ! Update: psi_new = psi + (k1 + 2*k2 + 2*k3 + k4) * dt / 6
+        psi = psi + (k1 + 2._dp * k2 + 2._dp * k3 + k4) * (dt / 6._dp)
+
+        deallocate(k1, k2, k3, k4, psi_tmp)
+
+    end subroutine rk4_step_kh
 
     !> Clean up FFTW plans, memory, and kinetic energy array
     subroutine finalize(this)

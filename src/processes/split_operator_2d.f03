@@ -22,6 +22,7 @@ module split_operator_2d_mod
         procedure :: split_operator_initialize ! Initialize memory and functions based on gauge choice
         procedure :: kprop_gen_len       ! Generate length-guage kinetic propagators 
         procedure :: vprop_gen_len       ! Generate length-guage potential propagators
+        procedure :: vprop_gen_kh        ! Generate KH-gauge (time-dep) potential propagators
         procedure :: kprop_gen_vel       ! Generate velocity-guage kinetic propagators 
         procedure :: vprop_gen_vel       ! Generate velocity-guage potential propagators
         procedure :: split_operator_step      ! Apply split-operator step
@@ -113,6 +114,21 @@ contains
         this%vcol_prop = exp(-im * 0.5_dp * dt / R)
 
     end subroutine vprop_gen_len
+
+    !> Generate KH-gauge potential propagator (no E-field term — laser coupling in potential)
+    subroutine vprop_gen_kh(this, pot_kh)
+        use global_vars, only: dt, dp
+        use data_au, only: im
+        class(split_operator_2d_type), intent(inout) :: this
+        real(dp), intent(in) :: pot_kh(:,:)
+        integer :: j
+
+        do j = 1, size(pot_kh, 2)
+            this%vprop(:, j) = exp(-im * 0.5_dp * dt * pot_kh(:, j))
+        end do
+        this%vcol_prop = exp(-im * 0.5_dp * dt / size(pot_kh, 1))  ! dummy, not used in KH
+
+    end subroutine vprop_gen_kh
 
     subroutine vprop_gen_vel(this)
         use global_vars, only: dt, pot, dp, R

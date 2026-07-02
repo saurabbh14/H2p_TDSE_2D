@@ -20,7 +20,7 @@ contains
             write(*,*) 'Error in fftw_init_threads, quitting'
             stop
         else
-            print*, 'number of threads found =', void
+            print*, 'fftw threads initiate successfully'
         endif
     end subroutine fftw_initialize_threads
 
@@ -35,6 +35,7 @@ contains
             call fftw_plan_with_nthreads(omp_get_max_threads())
             planF = fftw_plan_r2r_1d(NR, psi_in, psi_out, FFTW_R2HC, FFTW_MEASURE)
             planB = fftw_plan_r2r_1d(NR, psi_in, psi_out, FFTW_HC2R, FFTW_MEASURE)
+            print*, "Created fftw plans with ", omp_get_max_threads(), ' threads.'
         case default
             planF = fftw_plan_r2r_1d(NR, psi_in, psi_out, FFTW_R2HC, FFTW_MEASURE)
             planB = fftw_plan_r2r_1d(NR, psi_in, psi_out, FFTW_HC2R, FFTW_MEASURE)
@@ -52,6 +53,7 @@ contains
             call fftw_plan_with_nthreads(omp_get_max_threads())
             planF = fftw_plan_dft_1d(NR, psi_in, psi_out, FFTW_FORWARD, FFTW_MEASURE)
             planB = fftw_plan_dft_1d(NR, psi_in, psi_out, FFTW_BACKWARD, FFTW_MEASURE)
+            print*, "Created fftw plans with ", omp_get_max_threads(), ' threads.'
         case default
             planF = fftw_plan_dft_1d(NR, psi_in, psi_out, FFTW_FORWARD, FFTW_MEASURE)
             planB = fftw_plan_dft_1d(NR, psi_in, psi_out, FFTW_BACKWARD, FFTW_MEASURE)
@@ -66,9 +68,10 @@ contains
         character(len=10), intent(in) :: parallel
         select case(parallel)
         case("parallel")
-            call fftw_plan_with_nthreads(omp_get_max_threads())
+            call fftw_plan_with_nthreads(omp_get_max_threads()/2)
             planF = fftw_plan_dft_2d(Nx, NR, psi_in, psi_out, FFTW_FORWARD, FFTW_MEASURE)
             planB = fftw_plan_dft_2d(Nx, NR, psi_in, psi_out, FFTW_BACKWARD, FFTW_MEASURE)
+            print*, "Created fftw plans with ", omp_get_max_threads()/2, ' threads.'
         case default
             planF = fftw_plan_dft_2d(Nx, NR, psi_in, psi_out, FFTW_FORWARD, FFTW_MEASURE)
             planB = fftw_plan_dft_2d(Nx, NR, psi_in, psi_out, FFTW_BACKWARD, FFTW_MEASURE)
