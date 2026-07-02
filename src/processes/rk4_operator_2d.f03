@@ -163,12 +163,13 @@ contains
     !! Uses time-dependent KH potential (laser coupling already in potential, no E-field term)
     !! pot_now  = V_KH(R, x, t)
     !! pot_half = V_KH(R, x, t + dt/2)
-    subroutine rk4_step_kh(this, psi, dt, pot_now, pot_half)
+    !! pot_next = V_KH(R, x, t + dt)
+    subroutine rk4_step_kh(this, psi, dt, pot_now, pot_half, pot_next)
         use global_vars, only: NR, Nx
         class(rk4_operator_2d_type), intent(inout) :: this
         complex(dp), intent(inout) :: psi(NR, Nx)
         real(dp), intent(in)      :: dt
-        real(dp), intent(in)      :: pot_now(NR, Nx), pot_half(NR, Nx)
+        real(dp), intent(in)      :: pot_now(NR, Nx), pot_half(NR, Nx), pot_next(NR, Nx)
 
         complex(dp), allocatable :: k1(:,:), k2(:,:), k3(:,:), k4(:,:)
         complex(dp), allocatable :: psi_tmp(:,:)
@@ -190,9 +191,9 @@ contains
         psi_tmp = psi + k2 * (0.5_dp * dt)
         call this%rhs_2d(psi_tmp, k3, E_zero, A_zero, pot_half)
 
-        ! k4 = rhs(psi + k3*dt, t + dt) with pot_now
+        ! k4 = rhs(psi + k3*dt, t + dt) with pot_next
         psi_tmp = psi + k3 * dt
-        call this%rhs_2d(psi_tmp, k4, E_zero, A_zero, pot_now)
+        call this%rhs_2d(psi_tmp, k4, E_zero, A_zero, pot_next)
 
         ! Update: psi_new = psi + (k1 + 2*k2 + 2*k3 + k4) * dt / 6
         psi = psi + (k1 + 2._dp * k2 + 2._dp * k3 + k4) * (dt / 6._dp)

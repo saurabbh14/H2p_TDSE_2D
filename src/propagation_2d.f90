@@ -351,7 +351,7 @@ contains
         real(dp) :: alpha_t(Nt)
         real(dp) :: E_half, A_half       ! fields at t + dt/2 for RK4
         real(dp) :: alpha_half           ! quiver disp at t + dt/2 for RK4-KH
-        real(dp), allocatable :: pot_kh(:,:), pot_kh_half(:,:)
+        real(dp), allocatable :: pot_kh(:,:), pot_kh_half(:,:), pot_kh_next(:,:)
         real(dp) :: E_zero, A_zero       ! zero fields for KH mode
         character(*), intent(in) :: propagator_method
         character(20) :: in_xR, out_x, out_R, out_xR
@@ -391,6 +391,7 @@ contains
             allocate(pot_kh(NR, Nx))
             if (trim(adjustl(propagator_method)) == "rk4") then
                 allocate(pot_kh_half(NR, Nx))
+                allocate(pot_kh_next(NR, Nx))
             end if
             E_zero = 0._dp
             A_zero = 0._dp
@@ -425,7 +426,8 @@ contains
                         alpha_half = alpha_t(k)
                     end if
                     call build_kh_potential_at_time(pot_kh_half, alpha_half)
-                    call rk4_operator_2d%rk4_step_kh(this%psi, dt, pot_kh, pot_kh_half)
+                    call build_kh_potential_at_time(pot_kh_next, alpha_t(k+1))
+                    call rk4_operator_2d%rk4_step_kh(this%psi, dt, pot_kh, pot_kh_half, pot_kh_next)
                 case default
                     call build_kh_potential_at_time(pot_kh, alpha_t(k))
                     call split_operator_2d%vprop_gen_kh(pot_kh)
@@ -518,6 +520,7 @@ contains
         deallocate(psi_out_R_tmp, psi_out_x_tmp, psi_out_xR_tmp)
         if (allocated(pot_kh)) deallocate(pot_kh)
         if (allocated(pot_kh_half)) deallocate(pot_kh_half)
+        if (allocated(pot_kh_next)) deallocate(pot_kh_next)
         close(this%avgR_2d_tk)
         close(this%avgx_2d_tk)
         close(this%norm_2d_tk)
