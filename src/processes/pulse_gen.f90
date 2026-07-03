@@ -13,7 +13,7 @@ module pulse_mod
         character(150) :: envelope_shape_laser1, envelope_shape_laser2
         real(dp) :: tp1, fwhm, t_mid1, rise_time1
         real(dp) :: tp2, t_mid2, rise_time2
-        real(dp) :: e01, e02, phi1, phi2
+        real(dp) :: alpha01, alpha02, phi1, phi2
         real(dp) :: lambda1, lambda2
         real(dp) :: omega1, omega2
         real(dp) :: pulse_offset1, pulse_offset2
@@ -49,10 +49,10 @@ contains
         ! Intermediate variables for pulse_param components
         character(150) :: envelope_shape_laser1, envelope_shape_laser2
         real(dp) :: lambda1, lambda2, tp1, tp2, t_mid1, t_mid2
-        real(dp) :: E01, E02, phi1, phi2, rise_time1, rise_time2
+        real(dp) :: alpha01, alpha02, phi1, phi2, rise_time1, rise_time2
 
         namelist /laser_param/envelope_shape_laser1, envelope_shape_laser2, &
-        & lambda1, lambda2, tp1, tp2, t_mid1, t_mid2, E01, E02, & 
+        & lambda1, lambda2, tp1, tp2, t_mid1, t_mid2, alpha01, alpha02, & 
         & phi1, phi2, rise_time1, rise_time2
 
         open(newunit=input_tk, file=adjustl(trim(input_path)), status='old')
@@ -68,8 +68,8 @@ contains
         this%tp2 = tp2
         this%t_mid1 = t_mid1
         this%t_mid2 = t_mid2
-        this%E01 = E01
-        this%E02 = E02
+        this%alpha01 = alpha01
+        this%alpha02 = alpha02
         this%phi1 = phi1
         this%phi2 = phi2
         this%rise_time1 = rise_time1
@@ -83,7 +83,8 @@ contains
         print*, "Laser #1:"
         print*, "Envelope shape:", trim(this%envelope_shape_laser1)
         print*, "Lambda:", this%lambda1, "nm"
-        print*, "Electric field strength:", this%E01, "a.u."
+        print*, "Quiver amplitude (alpha0):", this%alpha01, "a.u."
+        print*, "Electric field strength (derived):", this%alpha01 * this%omega1**2, "a.u."
         print*, "Pulse width (tp):", this%tp1 * au2fs, "fs"
         print*, "Pulse midpoint:", this%t_mid1 * au2fs, "fs"
         print*, "phi1:", this%phi1, "pi"
@@ -91,7 +92,8 @@ contains
         print*, "Laser #2:"
         print*, "Envelope shape:", trim(this%envelope_shape_laser2)
         print*, "Lambda:", this%lambda2, "nm"
-        print*, "Electric field strength:", this%E02, "a.u."
+        print*, "Quiver amplitude (alpha0):", this%alpha02, "a.u."
+        print*, "Electric field strength (derived):", this%alpha02 * this%omega2**2, "a.u."
         print*, "Pulse width (tp):", this%tp2 * au2fs, "fs"
         print*, "Pulse midpoint:", this%t_mid2 * au2fs, "fs"
         print*, "phi2:", this%phi2, "pi"
@@ -100,12 +102,14 @@ contains
         print*, "Final pulse parameters:"
         print*, "Wavelength 1 =", sngl(this%lambda1), "nm"
         print*, "Phase 1 =", sngl(this%phi1)
-        print*, "Field strength =", sngl(this%e01), "a.u.", sngl(this%e01*e02au), "V/m"
-        print*, "Intensity =", sngl(this%e01**2*3.509e16_dp), "W/cm2"
+        print*, "Quiver amplitude 1 =", sngl(this%alpha01), "a.u."
+        print*, "Field strength 1 =", sngl(this%alpha01 * this%omega1**2), "a.u."
+        print*, "Intensity 1 =", sngl((this%alpha01 * this%omega1**2)**2 * 3.509e16_dp), "W/cm2"
         print*, "Wavelength 2 =", sngl(this%lambda2), "nm"
         print*, "Phase 2 =", sngl(this%phi2)
-        print*, "Field strength =", sngl(this%e02), "a.u.", sngl(this%e02*e02au), "V/m"
-        print*, "Intensity =", sngl(this%e02**2*3.509e16_dp), "W/cm2"
+        print*, "Quiver amplitude 2 =", sngl(this%alpha02), "a.u."
+        print*, "Field strength 2 =", sngl(this%alpha02 * this%omega2**2), "a.u."
+        print*, "Intensity 2 =", sngl((this%alpha02 * this%omega2**2)**2 * 3.509e16_dp), "W/cm2"
         print*, "Wave duration =", sngl(this%tp1*au2fs), "fs"
         print*, "------------------------------------------------------"
     end subroutine print_pulse_param
@@ -132,8 +136,8 @@ contains
         use differentiation, only: central_diff_on_grid
         class(pulse_param), intent(inout) :: this
         integer :: k
-        real(dp) :: A01, A02
-        real(dp) :: ttime
+        integer :: n_cycles
+        real(dp) :: ttime, TU_eff
 
         print*
         print*, "Pulse generation..."
@@ -155,9 +159,6 @@ contains
         this%pulse_offset1 = 0.0_dp
         this%pulse_offset2 = 0.0_dp
 
-        ! Calculate amplitudes
-        A01 = this%e01 / this%omega1
-        A02 = this%e02 / this%omega2
         ! Calculate the envelope shapes
         ! Envelope shape for laser 1
         select case(trim(this%envelope_shape_laser1))
@@ -165,7 +166,7 @@ contains
             !this%tp1 = this%tp1/(1-2/pi) ! check this
             do k = 1, Nt
                 this%g1(k) = cos2(time(k), this%tp1, this%t_mid1, this%pulse_offset1)
-                this%alpha_t1(k) = this%E01 * this%g1(k) * cos(this%omega1 * (time(k) - this%t_mid1 &
+                this%alpha_t1(k) = this%alpha01 * this%g1(k) * cos(this%omega1 * (time(k) - this%t_mid1 &
                   & - this%pulse_offset1) + this%phi1)  
             enddo
             call central_diff_on_grid(this%alpha_t1, Nt, dt, this%A21)
@@ -174,21 +175,29 @@ contains
         case("gaussian")
             do k = 1, Nt
                 this%g1(k) = gaussian(time(k), this%tp1, this%t_mid1)
-                this%alpha_t1(k) = this%E01 * this%g1(k) * cos(this%omega1 * (time(k) - this%t_mid1 &
+                this%alpha_t1(k) = this%alpha01 * this%g1(k) * cos(this%omega1 * (time(k) - this%t_mid1 &
                   & - this%pulse_offset1) + this%phi1)  
             enddo
             call central_diff_on_grid(this%alpha_t1, Nt, dt, this%A21)
             call central_diff_on_grid(this%A21, Nt, dt, this%E21)
             this%E21 = -this%E21
         case("trapezoidal")
+            n_cycles = nint(this%rise_time1 * this%omega1 / (2._dp * pi))
+            n_cycles = max(n_cycles, 1)
+            TU_eff = 2._dp * pi * real(n_cycles, dp) / this%omega1
+            print*, "Laser1 trapezoidal boundary times (fs):"
+            print'(a,f10.4)', "  Pulse start: ", (this%t_mid1 - this%tp1/2 - TU_eff + this%pulse_offset1)*au2fs
+            print'(a,f10.4)', "  Rise end:    ", (this%t_mid1 - this%tp1/2 + this%pulse_offset1)*au2fs
+            print'(a,f10.4)', "  Flat end:    ", (this%t_mid1 + this%tp1/2 + this%pulse_offset1)*au2fs
+            print'(a,f10.4)', "  Pulse end:   ", (this%t_mid1 + this%tp1/2 + TU_eff + this%pulse_offset1)*au2fs
             do k = 1, Nt
                 ttime = time(k) - this%t_mid1 - this%pulse_offset1 
-                this%g1(k) = trapezoidal(time(k), this%tp1, this%t_mid1, this%rise_time1)
-                this%alpha_t1(k) = this%E01 * this%g1(k) * cos(this%omega1 * ttime + this%phi1)
+                this%g1(k) = trapezoidal(time(k), this%tp1, this%t_mid1, TU_eff, this%pulse_offset1)
+                this%alpha_t1(k) = this%alpha01 * this%g1(k) * cos(this%omega1 * ttime + this%phi1)
                 this%A21(k) = trapezoidal_vector_pulse(time(K), this%omega1, this%phi1, &
-                    & this%E01, this%tp1, this%t_mid1, this%pulse_offset1, this%rise_time1) 
+                    & this%alpha01, this%tp1, this%t_mid1, this%pulse_offset1, TU_eff) 
                 this%E21(k) = trapezoidal_electric_pulse(time(K), this%omega1, this%phi1, &
-                    & this%E01, this%tp1, this%t_mid1, this%pulse_offset1, this%rise_time1) 
+                    & this%alpha01, this%tp1, this%t_mid1, this%pulse_offset1, TU_eff) 
             enddo
         case default
             print*, "Laser1: Default pulse shape is CW."
@@ -198,8 +207,8 @@ contains
         case("cos2")
             !this%tp1 = this%tp1/(1-2/pi) ! check this
             do k = 1, Nt 
-                this%g2(k) = cos2(time(k), this%tp1, this%t_mid2, this%pulse_offset2)
-                this%alpha_t2(k) = this%E02 * this%g2(k) * cos(this%omega2 * (time(k) - this%t_mid2 &
+                this%g2(k) = cos2(time(k), this%tp2, this%t_mid2, this%pulse_offset2)
+                this%alpha_t2(k) = this%alpha02 * this%g2(k) * cos(this%omega2 * (time(k) - this%t_mid2 &
                   & - this%pulse_offset2) + this%phi2)                
             enddo
             call central_diff_on_grid(this%alpha_t2, Nt, dt, this%A22)
@@ -208,20 +217,30 @@ contains
         case("gaussian")
             do k = 1, Nt
                 this%g2(k) = gaussian(time(k), this%tp2, this%t_mid2)
-                this%alpha_t2(k) = this%E02 * this%g2(k) * cos(this%omega2 * (time(k) - this%t_mid2 &
+                this%alpha_t2(k) = this%alpha02 * this%g2(k) * cos(this%omega2 * (time(k) - this%t_mid2 &
                   & - this%pulse_offset2) + this%phi2)
             enddo
             call central_diff_on_grid(this%alpha_t2, Nt, dt, this%A22)
             call central_diff_on_grid(this%A22, Nt, dt, this%E22)
             this%E22 = -this%E22
         case("trapezoidal")
+            n_cycles = nint(this%rise_time2 * this%omega2 / (2._dp * pi))
+            n_cycles = max(n_cycles, 1)
+            TU_eff = 2._dp * pi * real(n_cycles, dp) / this%omega2
+            print*, "Laser2 trapezoidal boundary times (fs):"
+            print'(a,f10.4)', "  Pulse start: ", (this%t_mid2 - this%tp2/2 - TU_eff + this%pulse_offset2)*au2fs
+            print'(a,f10.4)', "  Rise end:    ", (this%t_mid2 - this%tp2/2 + this%pulse_offset2)*au2fs
+            print'(a,f10.4)', "  Flat end:    ", (this%t_mid2 + this%tp2/2 + this%pulse_offset2)*au2fs
+            print'(a,f10.4)', "  Pulse end:   ", (this%t_mid2 + this%tp2/2 + TU_eff + this%pulse_offset2)*au2fs
             do k = 1, Nt
-                this%g2(k) = trapezoidal(time(k), this%tp2, this%t_mid2, this%rise_time2)
-                this%alpha_t2(k) = this%E02 * this%g2(k) * cos(this%omega2 * (time(k) - this%t_mid2 &
+                this%g2(k) = trapezoidal(time(k), this%tp2, this%t_mid2, TU_eff, this%pulse_offset2)
+                this%alpha_t2(k) = this%alpha02 * this%g2(k) * cos(this%omega2 * (time(k) - this%t_mid2 &
                   & - this%pulse_offset2) + this%phi2)                
+                this%A22(k) = trapezoidal_vector_pulse(time(K), this%omega2, this%phi2, &
+                    & this%alpha02, this%tp2, this%t_mid2, this%pulse_offset2, TU_eff)
+                this%E22(k) = trapezoidal_electric_pulse(time(K), this%omega2, this%phi2, &
+                    & this%alpha02, this%tp2, this%t_mid2, this%pulse_offset2, TU_eff)
             enddo
-            this%A22 = 0._dp
-            this%E22 = 0._dp
         case default
             print*, "Laser2: Default pulse shape is CW."
         end select
@@ -302,10 +321,10 @@ contains
         write(filename,fmt='(a,a)') adjustl(trim(pulse_data_dir)), 'envelope2.out'
         open(newunit=envelope2_tk, file=filename,status="unknown")
         write(filename,fmt='(a,a,f4.2,a,i0,a)') adjustl(trim(pulse_data_dir)), &
-            & 'electric_field1_E', this%E01,'_width',Int(this%tp1*au2fs),'.out'
+            & 'electric_field1_alpha', this%alpha01,'_width',Int(this%tp1*au2fs),'.out'
         open(newunit=field1_tk, file=filename,status="unknown")
         write(filename,fmt='(a,a,f6.4,a,i0,a)') adjustl(trim(pulse_data_dir)), &
-            & 'electric_field2_E', this%E02,'_width',Int(this%tp2*au2fs),'.out'
+            & 'electric_field2_alpha', this%alpha02,'_width',Int(this%tp2*au2fs),'.out'
         open(newunit=field2_tk, file=filename,status="unknown")
         write(filename,fmt='(a,a,f4.2,a)') adjustl(trim(pulse_data_dir)), &
             & 'Total_electric_field_phi', this%phi2/pi,'pi.out'
@@ -349,19 +368,20 @@ contains
         endif
     end function cos2
 
-    function trapezoidal(time, tp, t_mid, rise_time)
-        real(dp) :: time, tp, t_mid, rise_time
-        real(dp) :: trapezoidal, slope, yc 
-        if (time .ge. t_mid - (tp/2 + rise_time) .and. time .le. t_mid - tp/2) then
+    function trapezoidal(time, tp, t_mid, rise_time, pulse_offset)
+        real(dp), intent(in) :: time, tp, t_mid, rise_time, pulse_offset
+        real(dp) :: trapezoidal, slope, yc, teff
+        teff = time - pulse_offset
+        if (teff .ge. t_mid - (tp/2 + rise_time) .and. teff .le. t_mid - tp/2) then
             slope = 1._dp/rise_time
             yc = (t_mid - (tp/2 + rise_time)) * slope
-            trapezoidal = slope * time - yc
-        elseif (time .gt. t_mid - tp/2 .and. time .le. t_mid + tp/2) then
+            trapezoidal = slope * teff - yc
+        elseif (teff .gt. t_mid - tp/2 .and. teff .le. t_mid + tp/2) then
             trapezoidal = 1._dp
-        elseif (time .gt. t_mid + tp/2 .and. time .le. t_mid+(tp/2 + rise_time)) then 
+        elseif (teff .gt. t_mid + tp/2 .and. teff .le. t_mid + (tp/2 + rise_time)) then 
             slope = -1._dp/rise_time
             yc = (t_mid + tp/2 + rise_time) * slope
-            trapezoidal = slope * time - yc
+            trapezoidal = slope * teff - yc
         else
             trapezoidal = 0._dp
         endif
@@ -376,89 +396,74 @@ contains
         gaussian = exp(-fwhm * (time - t_mid)**2)
     end function gaussian
 
-    function trapezoidal_vector_pulse(time, omega, phase, E0, tp, t_mid, pulse_offset, rise_time)
-        real(dp) :: time, ttime, tp, t_mid, rise_time, t_start, t_end, t_u
-        real(dp) :: trapezoidal_vector_pulse, pulse_offset, omega, phase, E0 
-        real(dp) :: slope, yc, rise_time_new
-        integer :: rise_cycles
+    !> Analytic vector potential A(t) = d(alpha_t)/dt with boundary-matched
+    !> integration constants so that A(t=0)=0 and A(t=TF)=0.
+    !> The caller must pass an integer-cycle-adjusted rise_time (TU) for
+    !> internal boundary matching between Case II and Case III.
+    function trapezoidal_vector_pulse(time, omega, phase, alpha0, tp, t_mid, pulse_offset, rise_time)
+        real(dp), intent(in) :: time, omega, phase, alpha0, tp, t_mid, pulse_offset, rise_time
+        real(dp) :: trapezoidal_vector_pulse
+        real(dp) :: t_start, t_local, theta, phi0
+        real(dp) :: TU, TF
 
-        rise_cycles = int(rise_time*omega/(2*pi)) + 1
-        rise_time_new = 2*pi*rise_cycles/omega
-        pulse_offset = 0._dp ! dummy (change this later)
-        t_start = 2.5_dp / au2fs ! CW envelope start
-        t_end = t_start + tp + 2*rise_time_new  ! CW envelope end
-        t_u = t_start + rise_time_new
-        ttime = time - t_start
-        
-        if (time .ge. t_start .and. time .le. t_u) then
-            slope = 1._dp/rise_time_new
-            yc = t_start 
-            trapezoidal_vector_pulse = -slope * E0 * (omega * (time - yc) * sin(omega * ttime + phase) &
-                & - cos(omega * ttime + phase ) + cos(phase) ) 
-            if (time-yc .le. 1e-2) then
-                print*, "Vector field:"
-                print*, "rise cycles: ", rise_cycles
-                print*, "t-start =", t_start*au2fs, ' fs'
-                print*, "t-end =", t_end*au2fs, ' fs'
-                print*, "New rise-time =", rise_time_new*au2fs, ' fs'
-                print*, "slope =", slope, ' E0 =', E0
-                print*, "t = 0, A(t) =", trapezoidal_vector_pulse,&
-                    & ', [time =', time*au2fs, ' fs]'
-            endif
+        TU = rise_time
+        TF = tp + 2._dp * TU
+        t_start = t_mid - tp/2._dp - TU + pulse_offset
+        t_local = time - t_start
 
-        elseif (time .gt. t_u .and. time .le. t_u + tp) then
-            trapezoidal_vector_pulse = -E0 * omega * (sin(omega * ttime + phase) &
-                & + (cos(phase) - cos(omega*rise_time_new + phase))/(omega*rise_time_new))
+        ! Initial phase at pulse start
+        phi0 = -omega * (tp/2._dp + TU) + phase
+        theta = omega * t_local + phi0
 
-        elseif (time .gt. t_start + rise_time_new + tp .and. time .le. t_end) then 
-            slope = -1._dp/rise_time_new
-            yc = t_end 
-            trapezoidal_vector_pulse = -slope * E0 * (omega * (time - yc) * sin(omega * ttime + phase) &
-                & + cos(omega * ttime + phase) - cos(omega * (t_end-t_start) + phase) )
+        if (t_local .ge. 0._dp .and. t_local .le. TU) then
+            ! Case I: Rise
+            trapezoidal_vector_pulse = -alpha0 / TU &
+                & * ( omega * t_local * sin(theta) - cos(theta) + cos(phi0) )
+        elseif (t_local .gt. TU .and. t_local .le. TU + tp) then
+            ! Case II: Flat top
+            trapezoidal_vector_pulse = -alpha0 * omega &
+                & * ( sin(theta) + (cos(phi0) - cos(omega * TU + phi0)) / (omega * TU) )
+        elseif (t_local .gt. TU + tp .and. t_local .le. TF) then
+            ! Case III: Fall
+            trapezoidal_vector_pulse = -alpha0 / TU &
+                & * ( (TF - t_local) * omega * sin(theta) + cos(theta) - cos(omega * TF + phi0) )
         else
             trapezoidal_vector_pulse = 0._dp
         endif
     end function trapezoidal_vector_pulse
 
-    function trapezoidal_electric_pulse(time, omega, phase, E0, tp, t_mid, pulse_offset, rise_time)
-        real(dp) :: time, ttime, tp, t_mid, rise_time, t_start, t_end, t_u
-        real(dp) :: trapezoidal_electric_pulse, pulse_offset, omega, phase, E0 
-        real(dp) :: slope, yc, rise_time_new
-        integer :: rise_cycles
+    !> Analytic electric field E(t) = -dA/dt with boundary-matched
+    !> integration constants so that E(t=0)=0 and E(t=TF)=0.
+    !> The caller must pass an integer-cycle-adjusted rise_time (TU) for
+    !> internal boundary matching between Case II and Case III.
+    function trapezoidal_electric_pulse(time, omega, phase, alpha0, tp, t_mid, pulse_offset, rise_time)
+        real(dp), intent(in) :: time, omega, phase, alpha0, tp, t_mid, pulse_offset, rise_time
+        real(dp) :: trapezoidal_electric_pulse
+        real(dp) :: t_start, t_local, theta, phi0
+        real(dp) :: TU, TF
 
-        rise_cycles = int(rise_time*omega/(2*pi)) + 1
-        rise_time_new = 2*pi*rise_cycles/omega
-        pulse_offset = 0._dp ! dummy (change this later)
-        t_start = 2.5_dp / au2fs ! CW envelope start
-        t_end = t_start + tp + 2*rise_time_new  ! CW envelope end
-        t_u = t_start + rise_time_new
-        ttime = time - t_start
-        
-        if (time .ge. t_start .and. time .le. t_u) then
-            slope = 1._dp/rise_time_new
-            yc = t_start 
-            trapezoidal_electric_pulse = -slope * E0 * (omega**2 * (time - yc) * cos(omega * ttime + phase) &
-                & + 2*omega*sin(omega * ttime + phase ) - 2*omega*sin(phase)) 
-            if (time-yc .le. 1e-2) then
-                print*, "Electric field:"
-                print*, "rise cycles: ", rise_cycles
-                print*, "t-start =", t_start*au2fs, ' fs'
-                print*, "t-end =", t_end*au2fs, ' fs'
-                print*, "New rise-time =", rise_time_new*au2fs, ' fs'
-                print*, "slope =", slope, ' E0 =', E0
-                print*, "t = 0, A(t) =", trapezoidal_electric_pulse,&
-                    & ', [time =', time*au2fs, ' fs]'
-            endif
+        TU = rise_time
+        TF = tp + 2._dp * TU
+        t_start = t_mid - tp/2._dp - TU + pulse_offset
+        t_local = time - t_start
 
-        elseif (time .gt. t_u .and. time .le. t_u + tp) then
-            trapezoidal_electric_pulse = -E0 * omega**2 * (cos(omega * ttime + phase) &
-                & + 2 * (sin(omega*rise_time_new + phase)- sin(phase))/(omega*rise_time_new))
+        ! Initial phase at pulse start
+        phi0 = -omega * (tp/2._dp + TU) + phase
+        theta = omega * t_local + phi0
 
-        elseif (time .gt. t_start + rise_time_new + tp .and. time .le. t_end) then 
-            slope = -1._dp/rise_time_new
-            yc = t_end 
-            trapezoidal_electric_pulse = -slope * E0 * (omega**2 * (time - yc) * cos(omega * ttime + phase) &
-                & + 2*omega*sin(omega * ttime + phase) - 2*omega*sin(omega * (t_end-t_start) + phase) )
+        if (t_local .ge. 0._dp .and. t_local .le. TU) then
+            ! Case I: Rise
+            trapezoidal_electric_pulse = alpha0 / TU &
+                & * ( omega**2 * t_local * cos(theta) + 2._dp * omega * sin(theta) - 2._dp * omega * sin(phi0) )
+        elseif (t_local .gt. TU .and. t_local .le. TU + tp) then
+            ! Case II: Flat top
+            trapezoidal_electric_pulse = alpha0 * omega**2 &
+                & * ( cos(theta) + 2._dp * (sin(omega * TU + phi0) - sin(phi0)) / (omega * TU) )
+        elseif (t_local .gt. TU + tp .and. t_local .le. TF) then
+            ! Case III: Fall
+            trapezoidal_electric_pulse = alpha0 / TU &
+                & * ( omega**2 * (TF - t_local) * cos(theta) + 2._dp * omega * sin(theta) &
+                &     - 2._dp * omega * sin(omega * TF + phi0) )
         else
             trapezoidal_electric_pulse = 0._dp
         endif
