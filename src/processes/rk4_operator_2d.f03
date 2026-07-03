@@ -72,7 +72,7 @@ contains
     !! V includes the 2D potential and the dipole-field interaction
     !! Supports both "length" and "velocity" gauge
     subroutine rhs_2d(this, psi, psi_rhs, E_field, A_field, pot)
-        use global_vars, only: NR, Nx, kap, lam, R, x
+        use global_vars, only: NR, Nx, kap, lam, R, x, pR, px, m_red
         use data_au, only: im
         use FFTW3
         class(rk4_operator_2d_type), intent(inout) :: this
@@ -83,6 +83,7 @@ contains
         real(dp), intent(in)     :: pot(NR, Nx)
 
         integer :: j
+        real(dp), allocatable :: kin_shifted(:,:)
 
         ! Start with psi_rhs = 0
         psi_rhs = (0._dp, 0._dp)
@@ -93,7 +94,22 @@ contains
         this%psi_out = (0._dp, 0._dp)
         this%psi_in = psi
         call fftw_execute_dft(this%planF, this%psi_in, this%psi_out)
-        this%psi_in = this%psi_out * this%kin_energy
+
+        select case(this%gauge)
+        case("length")
+            this%psi_in = this%psi_out * this%kin_energy
+        case("velocity")
+            ! Compute shifted kinetic energy on the fly:
+            ! (pR + lam*A)²/(2*m_red) + 0.5*(px + kap*A)²
+            allocate(kin_shifted(NR, Nx))
+            do j = 1, Nx
+                kin_shifted(:, j) = (pR(:) + lam * A_field)**2 / (2._dp * m_red) &
+                    & + 0.5_dp * (px(j) + kap * A_field)**2
+            end do
+            this%psi_in = this%psi_out * kin_shifted
+            deallocate(kin_shifted)
+        end select
+
         call fftw_execute_dft(this%planB, this%psi_in, this%psi_out)
         psi_rhs = this%psi_out / dble(NR * Nx)
 
@@ -105,10 +121,8 @@ contains
                     & + (pot(:, j) + kap * x(j) * E_field + lam * R(:) * E_field) * psi(:, j)
             end do
         case("velocity")
-            ! In velocity gauge, the field coupling is folded into the kinetic term,
-            ! so only the bare potential is used here. The kinetic term above
-            ! should be recomputed with shifted momentum for velocity gauge.
-            ! For simplicity, we apply the bare potential.
+            ! In velocity gauge, field coupling is in the shifted kinetic term.
+            ! Apply only the bare potential (no E-field coupling).
             psi_rhs = psi_rhs + pot * psi
         end select
 

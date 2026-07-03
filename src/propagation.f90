@@ -377,11 +377,11 @@ contains
     end subroutine write_headers_to_files
 
     !> Main time propagation loop: evolves wavefunction and writes outputs
-    !! Supports both "split_operator" and "rk4" propagator methods
+    !! Supports both "split_operator" and "rk4" propagator methods and both "length" and "velocity" gauge
     subroutine time_evolution(this, E, A, propagator_method)
         use global_vars, only: NR, Nstates, time, mu_all, Nt, &
-            & dp, dR, guess_vstates, dt, Vstates, R, pR, omp_nthreads, adb
-        use data_au, only: au2fs
+            & dp, dR, guess_vstates, dt, Vstates, R, pR, omp_nthreads, adb, gauge_2d, lam
+        use data_au, only: au2fs, im
         use blas_interfaces_module, only: zgemv
         use omp_lib
         class(time_prop), intent(inout) :: this
@@ -395,7 +395,9 @@ contains
         real(dp), allocatable, dimension(:) :: norm_SE_outR
         real(dp) :: E(Nt), A(Nt)
         real(dp) :: E_half       ! E(t + dt/2) for RK4
+        real(dp) :: A_half       ! A(t + dt/2) for RK4
         character(*), intent(in) :: propagator_method
+        character(20) :: gauge_local
         complex(dp), allocatable :: tout(:,:)
         complex(dp), allocatable :: psi_Nstates(:), psi_Nstates1(:)
         real(dp), allocatable :: psi_Nstates_real(:), psi_Nstates_imag(:)
@@ -412,23 +414,51 @@ contains
         ! Initialize continuum/absorber (always needed regardless of propagator)
         call continuum_1d%initialize()
 
-        ! Initialize propagator based on selected method
+        ! Determine gauge: use input parameter, default to "length"
+        gauge_local = trim(adjustl(gauge_2d))
+        if (gauge_local .ne. 'length' .and. gauge_local .ne. 'velocity') then
+            gauge_local = 'length'
+        end if
+        print*, "Gauge:", gauge_local
+
+        ! Initialize propagator based on selected method and gauge
         select case(trim(adjustl(propagator_method)))
         case("split_operator")
             print*, "Using split-operator propagator ..."
+            split_operator%gauge = gauge_local
             call split_operator%fft_initialize()
-            call split_operator%kprop_gen()
             call split_operator%vprop_gen()
+            select case(gauge_local)
+            case("length")
+                call split_operator%kprop_gen_len()
+            case("velocity")
+                call split_operator%kprop_gen_vel(A(1))
+            end select
         case("rk4")
             print*, "Using RK4 propagator ..."
+            rk4_operator%gauge = gauge_local
             call rk4_operator%fft_initialize()
         case default
             print*, "Warning: Unknown propagator_method '", trim(adjustl(propagator_method)), &
                 & "'. Defaulting to split_operator."
+            split_operator%gauge = gauge_local
             call split_operator%fft_initialize()
-            call split_operator%kprop_gen()
             call split_operator%vprop_gen()
+            select case(gauge_local)
+            case("length")
+                call split_operator%kprop_gen_len()
+            case("velocity")
+                call split_operator%kprop_gen_vel(A(1))
+            end select
         end select
+
+        ! Initial wavefunction gauge transformation for velocity gauge
+        if (gauge_local == "velocity") then
+            print*, "Applying initial gauge transformation to wavefunction ..."
+            do j = 1, Nstates
+                this%psi_ges(:,j) = this%psi_ges(:,j) * exp(-im * lam * A(1) * R(:))
+            end do
+        end if
 
         max_num_threads = omp_get_max_threads()
         print*
@@ -468,6 +498,11 @@ contains
             !=============================================================
             case("split_operator")
             !=============================================================
+                ! For velocity gauge: regenerate kinetic propagator with current A(k)
+                if (gauge_local == "velocity") then
+                    call split_operator%kprop_gen_vel(A(k))
+                end if
+
                 ! Kinetic propagation half step
                 call split_operator%split_operator_step(this%psi_ges)
                 ! Potential propagation full step
@@ -477,6 +512,7 @@ contains
                 end do
                 
                 ! Off-diagonal potential matrix full step i.e interstates coupling
+                ! Dipole coupling kap*mu(R)*E is gauge-invariant — always applied
                 !$OMP PARALLEL DO DEFAULT(NONE) FiRSTPRiVATE(tout, psi_Nstates, psi_Nstates1) &
                 !$OMP FiRSTPRiVATE(psi_Nstates_real, psi_Nstates_imag) &
                 !$OMP SHARED(mu_all, E, this, k, Nstates, NR, dt)
@@ -501,14 +537,18 @@ contains
             !=============================================================
             case("rk4")
             !=============================================================
-                ! Compute E_field at halftime and next step
-                ! k1 uses E(k), k2/k3 use E_half, k4 uses E_next
+                ! Compute fields at halftime and next step
+                ! k1 uses E(k),A(k); k2/k3 use E_half,A_half; k4 uses E_next,A_next
                 if (k < Nt) then
                     E_half = 0.5_dp * (E(k) + E(k+1))
-                    call rk4_operator%rk4_step(this%psi_ges, dt, E(k), E_half, E(k+1), mu_all, adb)
+                    A_half = 0.5_dp * (A(k) + A(k+1))
+                    call rk4_operator%rk4_step(this%psi_ges, dt, E(k), E_half, E(k+1), &
+                        & A(k), A_half, A(k+1), mu_all, adb)
                 else
-                    E_half = E(k)  ! last step, use E(k) for all
-                    call rk4_operator%rk4_step(this%psi_ges, dt, E(k), E_half, E(k), mu_all, adb)
+                    E_half = E(k)
+                    A_half = A(k)
+                    call rk4_operator%rk4_step(this%psi_ges, dt, E(k), E_half, E(k), &
+                        & A(k), A_half, A(k), mu_all, adb)
                 end if
 
             end select

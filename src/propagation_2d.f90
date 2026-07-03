@@ -2,8 +2,8 @@ module propagation2d_mod
     use iso_c_binding, only: C_DOUBLE, C_PTR, C_SIZE_T
     use varprecision, only: dp
     use global_vars, only: Nt, Nx, NR, Nstates, guess_vstates, &
-        & R, x, dR, dx, dt, m_eff, m_red, pR, Px, kap, lam, time
-    use data_au, only: au2eV
+        & R, x, dR, dx, dt, m_eff, m_red, pR, Px, kap, lam, time, gauge_2d
+    use data_au, only: au2eV, im
     use split_operator_2d_mod, only: split_operator_2d_type
     use rk4_operator_2d_mod, only: rk4_operator_2d_type
     use setpot_mod, only: build_kh_potential_at_time
@@ -361,20 +361,35 @@ contains
         allocate(psi_out_R_tmp(NR,Nx), psi_out_x_tmp(NR,Nx))
         allocate(psi_out_xR_tmp(NR,Nx))
 
-        ! Initialize propagator based on selected method
+        ! Initialize propagator based on selected method and gauge
         select case(trim(adjustl(propagator_method)))
         case("split_operator")
-            split_operator_2d%gauge = "length"
+            split_operator_2d%gauge = gauge_2d
             call split_operator_2d%fft_initialize()
             call split_operator_2d%split_operator_initialize()
+            ! For velocity gauge, generate initial kprop with A(1)
+            if (trim(adjustl(gauge_2d)) == "velocity") then
+                call split_operator_2d%kprop_gen_vel(A(1))
+            end if
         case("rk4")
-            rk4_operator_2d%gauge = "length"
+            rk4_operator_2d%gauge = gauge_2d
             call rk4_operator_2d%fft_initialize()
         case default
-            split_operator_2d%gauge = "length"
+            split_operator_2d%gauge = gauge_2d
             call split_operator_2d%fft_initialize()
             call split_operator_2d%split_operator_initialize()
+            if (trim(adjustl(gauge_2d)) == "velocity") then
+                call split_operator_2d%kprop_gen_vel(A(1))
+            end if
         end select
+
+        ! Initial wavefunction gauge transformation for velocity gauge
+        if (trim(adjustl(gauge_2d)) == "velocity") then
+            print*, "Applying initial gauge transformation to 2D wavefunction ..."
+            do j = 1, Nx
+                this%psi(:,j) = this%psi(:,j) * exp(im * A(1) * (kap * x(j) + lam * R(:)))
+            end do
+        end if
 
         ! Defining simulation regions
         write(in_xR, '(a)') "inner-xR"
@@ -441,7 +456,15 @@ contains
                 !=============================================================
                 case("split_operator")
                 !=============================================================
-                    call split_operator_2d%vprop_gen_len(E(k), A(k))
+                    if (trim(adjustl(gauge_2d)) == "velocity") then
+                        ! Regenerate shifted-momentum kinetic propagator with current A(k)
+                        call split_operator_2d%kprop_gen_vel(A(k))
+                        ! Bare potential propagator (no E-field coupling)
+                        call split_operator_2d%vprop_gen_vel()
+                    else
+                        ! Length gauge: potential includes dipole coupling
+                        call split_operator_2d%vprop_gen_len(E(k), A(k))
+                    end if
                     call split_operator_2d%split_operator_step(this%psi, in_xR)
 
                 !=============================================================
@@ -464,7 +487,12 @@ contains
                 !=============================================================
                 case default
                 !=============================================================
-                    call split_operator_2d%vprop_gen_len(E(k), A(k))
+                    if (trim(adjustl(gauge_2d)) == "velocity") then
+                        call split_operator_2d%kprop_gen_vel(A(k))
+                        call split_operator_2d%vprop_gen_vel()
+                    else
+                        call split_operator_2d%vprop_gen_len(E(k), A(k))
+                    end if
                     call split_operator_2d%split_operator_step(this%psi, in_xR)
 
                 end select

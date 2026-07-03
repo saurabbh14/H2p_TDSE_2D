@@ -35,6 +35,7 @@ module PrintInputVars
         print*
         print*, "TDSE Initial State:"
         print*, "Mode: ", trim(initial_distribution)
+        print*, "Gauge:", trim(gauge_2d)
         print*, "electronic state(s) ", (N_ini-1)
         print*, "vibrational state(s) ", (v_ini-1)
         print*, "Gaussian Distribution TDSE: "

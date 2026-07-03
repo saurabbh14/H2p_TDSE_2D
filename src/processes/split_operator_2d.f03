@@ -67,7 +67,9 @@ contains
             call this%kprop_gen_len()
             
         case("velocity")
-            call this%vprop_gen_vel() 
+            call this%vprop_gen_vel()
+            ! Note: kprop_gen_vel(A) must be called per time-step with current A
+            ! from the main propagation loop (propagation_2d.f90)
         end select  
     end subroutine
 

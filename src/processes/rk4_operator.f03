@@ -7,7 +7,9 @@ module rk4_operator_mod
 
     !> Type for RK4 time propagation with FFTW management
     !! Handles kinetic operator via FFT, and provides RHS evaluation for RK4 stepping
+    !! Supports both "length" and "velocity" gauge
     type :: rk4_operator_type
+        character(20) :: gauge ! Gauge Type: "length" or "velocity"
         ! Kinetic energy factor in momentum space: p²/(2*m_red)
         real(dp), allocatable :: kin_energy(:)
         ! FFTW plan and memory pointers
@@ -63,11 +65,10 @@ contains
 
     !> Evaluate RHS of TDSE: rhs = -i * H * psi
     !! H = T + V_diag + V_coupling(t)
-    !! T is applied via FFT (kinetic energy in momentum space)
-    !! V_diag is the adiabatic potential for each electronic state
-    !! V_coupling is the off-diagonal dipole coupling matrix
-    subroutine rhs_1d(this, psi, psi_rhs, E_field, mu_all, adb)
-        use global_vars, only: NR, Nstates
+    !! In length gauge: T = p²/(2m), V_coupling = -kap*mu*E
+    !! In velocity gauge: T = (p + lam*A)²/(2m), no V_coupling (field in kinetic term)
+    subroutine rhs_1d(this, psi, psi_rhs, E_field, A_field, mu_all, adb)
+        use global_vars, only: NR, Nstates, pR, lam, m_red
         use data_au, only: im
         use blas_interfaces_module, only: zgemv
         use FFTW3
@@ -75,29 +76,49 @@ contains
         complex(dp), intent(in)  :: psi(NR, Nstates)
         complex(dp), intent(out) :: psi_rhs(NR, Nstates)
         real(dp), intent(in)     :: E_field
+        real(dp), intent(in)     :: A_field
         real(dp), intent(in)     :: mu_all(Nstates, Nstates, NR)
         real(dp), intent(in)     :: adb(NR, Nstates)
 
         integer :: i, j
         complex(dp) :: tout(Nstates, Nstates)
         complex(dp) :: psi_Nstates(Nstates), psi_Nstates1(Nstates)
+        real(dp), allocatable :: kin_shifted(:)
 
         ! Start with psi_rhs = 0
         psi_rhs = (0._dp, 0._dp)
 
         ! Step 1: Kinetic energy contribution: T * psi
         ! For each electronic state: FFT → multiply by kin_energy → iFFT
-        do j = 1, Nstates
-            this%psi_in = (0._dp, 0._dp)
-            this%psi_out = (0._dp, 0._dp)
-            this%psi_in(:) = psi(:, j)
-            call fftw_execute_dft(this%planF, this%psi_in, this%psi_out)
-            ! Multiply by kinetic energy in momentum space
-            this%psi_in = this%psi_out * this%kin_energy(:)
-            call fftw_execute_dft(this%planB, this%psi_in, this%psi_out)
-            ! Normalize and add to RHS
-            psi_rhs(:, j) = this%psi_out(:) / dble(NR)
-        end do
+        select case(this%gauge)
+        case("length")
+            do j = 1, Nstates
+                this%psi_in = (0._dp, 0._dp)
+                this%psi_out = (0._dp, 0._dp)
+                this%psi_in(:) = psi(:, j)
+                call fftw_execute_dft(this%planF, this%psi_in, this%psi_out)
+                this%psi_in = this%psi_out * this%kin_energy(:)
+                call fftw_execute_dft(this%planB, this%psi_in, this%psi_out)
+                psi_rhs(:, j) = this%psi_out(:) / dble(NR)
+            end do
+
+        case("velocity")
+            ! Compute shifted kinetic energy on the fly: (pR + lam*A)² / (2*m_red)
+            allocate(kin_shifted(NR))
+            kin_shifted(:) = (pR(:) + lam * A_field)**2 / (2._dp * m_red)
+
+            do j = 1, Nstates
+                this%psi_in = (0._dp, 0._dp)
+                this%psi_out = (0._dp, 0._dp)
+                this%psi_in(:) = psi(:, j)
+                call fftw_execute_dft(this%planF, this%psi_in, this%psi_out)
+                this%psi_in = this%psi_out * kin_shifted(:)
+                call fftw_execute_dft(this%planB, this%psi_in, this%psi_out)
+                psi_rhs(:, j) = this%psi_out(:) / dble(NR)
+            end do
+
+            deallocate(kin_shifted)
+        end select
 
         ! Step 2: Diagonal potential contribution: V_diag * psi
         do j = 1, Nstates
@@ -105,7 +126,7 @@ contains
         end do
 
         ! Step 3: Off-diagonal dipole coupling: V_coupling(t) * psi
-        ! at each grid point, apply the dipole matrix (no exponentiation)
+        ! Dipole coupling kap*mu(R)*E is gauge-invariant — always applied
         do i = 1, NR
             call pulse_direct(tout, mu_all(:, :, i), E_field)
             psi_Nstates(:) = psi(i, :)
@@ -125,7 +146,8 @@ contains
     !! k2 = rhs(psi + k1*dt/2, t + dt/2)
     !! k3 = rhs(psi + k2*dt/2, t + dt/2)
     !! k4 = rhs(psi + k3*dt, t + dt)
-    subroutine rk4_step(this, psi, dt, E_field_now, E_field_half, E_field_next, mu_all, adb)
+    subroutine rk4_step(this, psi, dt, E_field_now, E_field_half, E_field_next, &
+        & A_field_now, A_field_half, A_field_next, mu_all, adb)
         use global_vars, only: NR, Nstates
         class(rk4_operator_type), intent(inout) :: this
         complex(dp), intent(inout) :: psi(NR, Nstates)
@@ -133,6 +155,9 @@ contains
         real(dp), intent(in)      :: E_field_now    ! E(t)
         real(dp), intent(in)      :: E_field_half   ! E(t + dt/2)
         real(dp), intent(in)      :: E_field_next   ! E(t + dt)
+        real(dp), intent(in)      :: A_field_now    ! A(t)
+        real(dp), intent(in)      :: A_field_half   ! A(t + dt/2)
+        real(dp), intent(in)      :: A_field_next   ! A(t + dt)
         real(dp), intent(in)      :: mu_all(Nstates, Nstates, NR)
         real(dp), intent(in)      :: adb(NR, Nstates)
 
@@ -143,20 +168,20 @@ contains
         allocate(k3(NR, Nstates), k4(NR, Nstates))
         allocate(psi_tmp(NR, Nstates))
 
-        ! k1 = rhs(psi, t)        using E(t)
-        call this%rhs_1d(psi, k1, E_field_now, mu_all, adb)
+        ! k1 = rhs(psi, t)        using E(t), A(t)
+        call this%rhs_1d(psi, k1, E_field_now, A_field_now, mu_all, adb)
 
-        ! k2 = rhs(psi + k1*dt/2, t + dt/2)   using E(t+dt/2)
+        ! k2 = rhs(psi + k1*dt/2, t + dt/2)   using E(t+dt/2), A(t+dt/2)
         psi_tmp = psi + k1 * (0.5_dp * dt)
-        call this%rhs_1d(psi_tmp, k2, E_field_half, mu_all, adb)
+        call this%rhs_1d(psi_tmp, k2, E_field_half, A_field_half, mu_all, adb)
 
-        ! k3 = rhs(psi + k2*dt/2, t + dt/2)   using E(t+dt/2)
+        ! k3 = rhs(psi + k2*dt/2, t + dt/2)   using E(t+dt/2), A(t+dt/2)
         psi_tmp = psi + k2 * (0.5_dp * dt)
-        call this%rhs_1d(psi_tmp, k3, E_field_half, mu_all, adb)
+        call this%rhs_1d(psi_tmp, k3, E_field_half, A_field_half, mu_all, adb)
 
-        ! k4 = rhs(psi + k3*dt,   t + dt)     using E(t+dt)
+        ! k4 = rhs(psi + k3*dt,   t + dt)     using E(t+dt), A(t+dt)
         psi_tmp = psi + k3 * dt
-        call this%rhs_1d(psi_tmp, k4, E_field_next, mu_all, adb)
+        call this%rhs_1d(psi_tmp, k4, E_field_next, A_field_next, mu_all, adb)
 
         ! Update: psi_new = psi + (k1 + 2*k2 + 2*k3 + k4) * dt / 6
         psi = psi + (k1 + 2._dp * k2 + 2._dp * k3 + k4) * (dt / 6._dp)

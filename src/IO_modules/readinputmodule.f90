@@ -29,7 +29,8 @@ module ReadInputFile
       namelist /parallelization/prop_par_FFTW,ITP_par_FFTW
       namelist /openmp_threads/omp_nthreads
       namelist /propagation_method/propagator_method
-     
+      namelist /gauge_choice/gauge_2d
+      
       open(newunit=input_tk, file=adjustl(trim(this%path)), status='old')
       read(input_tk,nml=R_grid)
       read(input_tk,nml=x_grid)
@@ -47,6 +48,10 @@ module ReadInputFile
       read(input_tk,nml=parallelization)
       read(input_tk,nml=openmp_threads)
       read(input_tk,nml=propagation_method)
+      read(input_tk,nml=gauge_choice)
+
+      ! Set default gauge if not specified
+      if (gauge_2d .eq. '') gauge_2d = 'length'
 
       close(input_tk)
 

@@ -58,5 +58,8 @@ module InputVars
 
     ! Propagation method selection
     character(2000):: propagator_method  ! "split_operator" | "rk4"
+
+    ! Gauge selection for propagation
+    character(20):: gauge_2d  ! "length" | "velocity"
     
 end module InputVars
