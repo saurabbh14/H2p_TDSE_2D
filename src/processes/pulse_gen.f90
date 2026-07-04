@@ -182,7 +182,7 @@ contains
             call central_diff_on_grid(this%A21, Nt, dt, this%E21)
             this%E21 = -this%E21
         case("trapezoidal")
-            n_cycles = nint(this%rise_time1 * this%omega1 / (2._dp * pi))
+            n_cycles = int(this%rise_time1 * this%omega1 / (2._dp * pi)) + 1
             n_cycles = max(n_cycles, 1)
             TU_eff = 2._dp * pi * real(n_cycles, dp) / this%omega1
             print*, "Laser1 trapezoidal boundary times (fs):"
@@ -224,7 +224,7 @@ contains
             call central_diff_on_grid(this%A22, Nt, dt, this%E22)
             this%E22 = -this%E22
         case("trapezoidal")
-            n_cycles = nint(this%rise_time2 * this%omega2 / (2._dp * pi))
+            n_cycles = int(this%rise_time2 * this%omega2 / (2._dp * pi)) + 1
             n_cycles = max(n_cycles, 1)
             TU_eff = 2._dp * pi * real(n_cycles, dp) / this%omega2
             print*, "Laser2 trapezoidal boundary times (fs):"
@@ -309,6 +309,7 @@ contains
         use global_vars, only: pulse_data_dir
         class(pulse_param), intent(in) :: this
         integer :: k
+        real(dp) :: A_check(Nt), alpha_t_check(Nt)
         character(150) :: filename
  
         ! file tokens
@@ -337,13 +338,16 @@ contains
         open(newunit=kh_field_tk, file=filename,status="unknown")
 
         timeloop: do k = 1, Nt
+            ! Check elctric field correctness by reverse generating the vector potential
+            A_check(k) = -sum(this%El(1:k))*dt
+            alpha_t_check(k) = -sum(this%Al(1:k))*dt
             write(field1_tk,*) time(k)*au2fs, this%E21(k), this%A21(k), this%alpha_t1(k)
             write(field2_tk,*) time(k)*au2fs, this%E22(k), this%A22(k), this%alpha_t2(k)
             write(envelope1_tk,*) time(k)*au2fs, this%g1(k)
             write(envelope2_tk,*) time(k)*au2fs, this%g2(k)
             write(elec_field_tk,*) time(k)*au2fs, this%El(k)
-            write(vec_field_tk,*) time(k)*au2fs, this%Al(k)
-            write(kh_field_tk,*) time(k)*au2fs, this%alpha_t(k)            
+            write(vec_field_tk,*) time(k)*au2fs, this%Al(k), A_check(k)
+            write(kh_field_tk,*) time(k)*au2fs, this%alpha_t(k), alpha_t_check(k)
         enddo timeloop
 
         print*, "Done writing field information in the files."
@@ -462,8 +466,8 @@ contains
         elseif (t_local .gt. TU + tp .and. t_local .le. TF) then
             ! Case III: Fall
             trapezoidal_electric_pulse = alpha0 / TU &
-                & * ( omega**2 * (TF - t_local) * cos(theta) + 2._dp * omega * sin(theta) &
-                &     - 2._dp * omega * sin(omega * TF + phi0) )
+                & * ( omega**2 * (TF - t_local) * cos(theta) - 2._dp * omega * sin(theta) &
+                &     + 2._dp * omega * sin(omega * TF + phi0) )
         else
             trapezoidal_electric_pulse = 0._dp
         endif
