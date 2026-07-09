@@ -137,7 +137,7 @@ contains
         class(pulse_param), intent(inout) :: this
         integer :: k
         integer :: n_cycles
-        real(dp) :: ttime, TU_eff
+        real(dp) :: ttime, TU_eff, tp_eff
 
         print*
         print*, "Pulse generation..."
@@ -163,7 +163,6 @@ contains
         ! Envelope shape for laser 1
         select case(trim(this%envelope_shape_laser1))
         case("cos2")
-            !this%tp1 = this%tp1/(1-2/pi) ! check this
             do k = 1, Nt
                 this%g1(k) = cos2(time(k), this%tp1, this%t_mid1, this%pulse_offset1)
                 this%alpha_t1(k) = this%alpha01 * this%g1(k) * cos(this%omega1 * (time(k) - this%t_mid1 &
@@ -172,15 +171,38 @@ contains
             call central_diff_on_grid(this%alpha_t1, Nt, dt, this%A21)
             call central_diff_on_grid(this%A21, Nt, dt, this%E21)
             this%E21 = -this%E21
+        
+        case("sin2")
+            n_cycles = int(this%tp1 * this%omega1 / (2._dp * pi)) + 1
+            n_cycles = max(n_cycles, 1)
+            tp_eff = 2._dp * pi * real(n_cycles, dp) / this%omega1
+            do k = 1, Nt
+                this%g1(k) = sin2(time(k), tp_eff, this%t_mid1, this%pulse_offset1)
+                this%alpha_t1(k) = this%alpha01 * this%g1(k) * sin(this%omega1 * (time(k) - this%t_mid1 &
+                    & - this%pulse_offset1 - tp_eff/2) + this%phi1)  
+                this%A21(k) = sin2_vector_pulse(time(k), tp_eff, this%t_mid1, this%alpha01, this%omega1, &
+                    & this%phi1, this%pulse_offset1)
+                this%E21(k) = sin2_electric_pulse(time(k), tp_eff, this%t_mid1, this%alpha01, this%omega1, &
+                    & this%phi1, this%pulse_offset1)
+            enddo
+            !call central_diff_on_grid(this%alpha_t1, Nt, dt, this%A21)
+            !call central_diff_on_grid(this%A21, Nt, dt, this%E21)
+            !this%E21 = -this%E21
+        
         case("gaussian")
             do k = 1, Nt
                 this%g1(k) = gaussian(time(k), this%tp1, this%t_mid1)
                 this%alpha_t1(k) = this%alpha01 * this%g1(k) * cos(this%omega1 * (time(k) - this%t_mid1 &
-                  & - this%pulse_offset1) + this%phi1)  
+                    & - this%pulse_offset1) + this%phi1)  
+                this%A21(k) = gaussian_vector_pulse(time(k), this%tp1, this%t_mid1, this%alpha01, this%omega1, &
+                    & this%phi1, this%pulse_offset1)
+                this%E21(k) = gaussian_electric_pulse(time(k), this%tp1, this%t_mid1, this%alpha01, this%omega1, &
+                    & this%phi1, this%pulse_offset1)
             enddo
-            call central_diff_on_grid(this%alpha_t1, Nt, dt, this%A21)
-            call central_diff_on_grid(this%A21, Nt, dt, this%E21)
-            this%E21 = -this%E21
+            !call central_diff_on_grid(this%alpha_t1, Nt, dt, this%A21)
+            !call central_diff_on_grid(this%A21, Nt, dt, this%E21)
+            !this%E21 = -this%E21
+        
         case("trapezoidal")
             n_cycles = int(this%rise_time1 * this%omega1 / (2._dp * pi)) + 1
             n_cycles = max(n_cycles, 1)
@@ -214,15 +236,38 @@ contains
             call central_diff_on_grid(this%alpha_t2, Nt, dt, this%A22)
             call central_diff_on_grid(this%A22, Nt, dt, this%E22)
             this%E22 = -this%E22
+        
+        case("sin2")
+            n_cycles = int(this%tp2 * this%omega2 / (2._dp * pi)) + 1
+            n_cycles = max(n_cycles, 1)
+            tp_eff = 2._dp * pi * real(n_cycles, dp) / this%omega2
+            do k = 1, Nt
+                this%g2(k) = sin2(time(k), tp_eff, this%t_mid2, this%pulse_offset2)
+                this%alpha_t2(k) = this%alpha02 * this%g2(k) * sin(this%omega2 * (time(k) - this%t_mid2 &
+                  & - this%pulse_offset2 + tp_eff/2) + this%phi2)
+                this%A22(k) = sin2_vector_pulse(time(k), tp_eff, this%t_mid2, this%alpha02, this%omega2, &
+                    & this%phi2, this%pulse_offset2)
+                this%E22(k) = sin2_electric_pulse(time(k), tp_eff, this%t_mid2, this%alpha02, this%omega2, &
+                    & this%phi2, this%pulse_offset2)  
+            enddo
+            !call central_diff_on_grid(this%alpha_t2, Nt, dt, this%A22)
+            !call central_diff_on_grid(this%A22, Nt, dt, this%E22)
+            !this%E22 = -this%E22
+        
         case("gaussian")
             do k = 1, Nt
                 this%g2(k) = gaussian(time(k), this%tp2, this%t_mid2)
                 this%alpha_t2(k) = this%alpha02 * this%g2(k) * cos(this%omega2 * (time(k) - this%t_mid2 &
                   & - this%pulse_offset2) + this%phi2)
+                this%A22(k) = gaussian_vector_pulse(time(k), this%tp2, this%t_mid2, this%alpha02, this%omega2, &
+                    & this%phi2, this%pulse_offset2)
+                this%E22(k) = gaussian_electric_pulse(time(k), this%tp2, this%t_mid2, this%alpha02, this%omega2, &
+                    & this%phi2, this%pulse_offset2)
             enddo
-            call central_diff_on_grid(this%alpha_t2, Nt, dt, this%A22)
-            call central_diff_on_grid(this%A22, Nt, dt, this%E22)
-            this%E22 = -this%E22
+            !call central_diff_on_grid(this%alpha_t2, Nt, dt, this%A22)
+            !call central_diff_on_grid(this%A22, Nt, dt, this%E22)
+            !this%E22 = -this%E22
+        
         case("trapezoidal")
             n_cycles = int(this%rise_time2 * this%omega2 / (2._dp * pi)) + 1
             n_cycles = max(n_cycles, 1)
@@ -340,7 +385,7 @@ contains
         timeloop: do k = 1, Nt
             ! Check elctric field correctness by reverse generating the vector potential
             A_check(k) = -sum(this%El(1:k))*dt
-            alpha_t_check(k) = -sum(this%Al(1:k))*dt
+            alpha_t_check(k) = sum(this%Al(1:k))*dt
             write(field1_tk,*) time(k)*au2fs, this%E21(k), this%A21(k), this%alpha_t1(k)
             write(field2_tk,*) time(k)*au2fs, this%E22(k), this%A22(k), this%alpha_t2(k)
             write(envelope1_tk,*) time(k)*au2fs, this%g1(k)
@@ -372,6 +417,16 @@ contains
         endif
     end function cos2
 
+    function sin2(time, tp, t_mid, pulse_offset)
+        real(dp), intent(in) :: time, tp, t_mid, pulse_offset
+        real(dp) :: sin2
+        if (time .gt. (t_mid+pulse_offset-tp/2) .and. time .lt. (t_mid+pulse_offset+tp/2)) then
+            sin2 = sin((time - t_mid-pulse_offset+tp/2)*pi/tp)**2      
+        else
+            sin2 = 0._dp
+        endif
+    end function sin2
+
     function trapezoidal(time, tp, t_mid, rise_time, pulse_offset)
         real(dp), intent(in) :: time, tp, t_mid, rise_time, pulse_offset
         real(dp) :: trapezoidal, slope, yc, teff
@@ -399,6 +454,69 @@ contains
         fwhm = (4._dp * log(2._dp)) / tp**2
         gaussian = exp(-fwhm * (time - t_mid)**2)
     end function gaussian
+
+    ! Analytic vector and electric fields %%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
+    function gaussian_vector_pulse(time, tp, t_mid, alpha0, omega, phase, pulse_offset)
+        implicit none
+        real(dp), intent(in) :: time, tp, t_mid, alpha0, omega, phase, pulse_offset
+        real(dp) :: gaussian, fwhm, theta
+        real(dp) :: gaussian_vector_pulse
+        theta = omega * (time-t_mid-pulse_offset) + phase
+        fwhm = (4._dp * log(2._dp)) / tp**2
+        gaussian = exp(-fwhm * (time - t_mid)**2)
+        gaussian_vector_pulse = -alpha0 * gaussian * ((time-t_mid) * 2._dp * fwhm * cos(theta) &
+            & + omega * sin(theta))
+    end function gaussian_vector_pulse
+
+    function gaussian_electric_pulse(time, tp, t_mid, alpha0, omega, phase, pulse_offset)
+        implicit none
+        real(dp), intent(in) :: time, tp, t_mid, alpha0, omega, phase, pulse_offset
+        real(dp) :: gaussian, fwhm, theta, t
+        real(dp) :: gaussian_electric_pulse
+        t = time - t_mid
+        theta = omega * (time-t_mid-pulse_offset) + phase
+        fwhm = (4._dp * log(2._dp)) / tp**2
+        gaussian = exp(-fwhm * t*t)
+        gaussian_electric_pulse = alpha0 * gaussian * (t*t * 4._dp *fwhm * fwhm  &
+            & + 2._dp * fwhm + omega * omega) * cos(theta)
+    end function gaussian_electric_pulse
+
+    function sin2_vector_pulse(time, tp, t_mid, alpha0, omega, phase, pulse_offset)
+        implicit none
+        real(dp), intent(in) :: time, tp, t_mid, alpha0, omega, phase, pulse_offset
+        real(dp) :: sin2, theta, t_local, inv_tp
+        real(dp) :: sin2_vector_pulse
+        if (time .gt. (t_mid+pulse_offset-tp/2) .and. time .lt. (t_mid+pulse_offset+tp/2)) then
+            t_local = time - t_mid - pulse_offset + tp/2
+            inv_tp = 1._dp/tp
+            theta = omega * t_local + phase
+            sin2 = sin(pi * t_local * inv_tp)**2
+
+            sin2_vector_pulse = alpha0 * ( pi* inv_tp * sin(2._dp * pi * t_local * inv_tp) * sin(theta) &
+                & + omega * sin2 * cos(theta))
+        else
+            sin2_vector_pulse = 0._dp
+        endif
+    end function sin2_vector_pulse
+
+    function sin2_electric_pulse(time, tp, t_mid, alpha0, omega, phase, pulse_offset)
+        implicit none
+        real(dp), intent(in) :: time, tp, t_mid, alpha0, omega, phase, pulse_offset
+        real(dp) :: sin2, theta, t_local, inv_tp
+        real(dp) :: sin2_electric_pulse
+        if (time .gt. (t_mid+pulse_offset-tp/2) .and. time .lt. (t_mid+pulse_offset+tp/2)) then
+            t_local = time - t_mid - pulse_offset + tp/2
+            inv_tp = 1._dp/tp
+            theta = omega * t_local + phase
+            sin2 = sin(pi * t_local * inv_tp)**2
+
+            sin2_electric_pulse = -alpha0 * ( 2._dp * pi*pi * inv_tp*inv_tp * cos(2._dp * pi * t_local * inv_tp) & 
+                & * sin(theta) + 2._dp * omega * pi * inv_tp * sin(2._dp * pi * t_local * inv_tp) * cos(theta) &
+                & - omega * omega * sin2 * sin(theta))
+        else
+            sin2_electric_pulse = 0._dp
+        endif
+    end function sin2_electric_pulse
 
     !> Analytic vector potential A(t) = d(alpha_t)/dt with boundary-matched
     !> integration constants so that A(t=0)=0 and A(t=TF)=0.

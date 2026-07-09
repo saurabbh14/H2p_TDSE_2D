@@ -16,6 +16,7 @@ module InputVars
     character(200):: sc_kind         ! "on_grid" | "static" (select potential source)
     character(2000):: sc_params     ! filename for soft-core parameters if sc_kind = "on_grid"
     character(2000):: CalcMode = "Lab"      ! "Lab" | "KH" (cycle-avg) | "KH_td" (time-dep KH)
+    character(200):: bo_pot_kind         ! "on_nuclr_grid" | "Morse" (select potential source)
     real(dp):: alpha0                     ! alpha0 for KH potential (in Angstrom)
 
     ! vibrational states 
@@ -39,7 +40,7 @@ module InputVars
     
     ! input / output file paths and prefixes
     character(2000):: input_data_dir       ! directory with input grids, dipoles, potentials
-    character(2000):: trans_dip_prefix ! trans_dip_prefix: optional prefix for dipole files
+    character(2000):: adb_pot, trans_dip_prefix ! adb_pot: filename for BO surfaces; trans_dip_prefix: optional prefix for dipole files
     character(2000):: output_data_dir      ! directory to write outputs
     
     ! transitions to be switched off (e.g. "12 23")

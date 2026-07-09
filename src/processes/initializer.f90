@@ -19,6 +19,7 @@ contains
         
         ! Read potentials and transition dipoles (or generate synthetic ones)
         call sc_read()
+        !call bo_pot_read()
         !call trans_dipole_read()
 
         ! Prepare grids and related parameters
@@ -230,6 +231,60 @@ contains
                 close(sc_out_tk)
         end select
     end subroutine sc_read
+
+    !> Read electronic Born–Oppenheimer potential surfaces from input file or
+    !> construct a Morse potential when bo_pot_kind="Morse".
+    subroutine bo_pot_read
+        use global_vars, only:R, NR, adb, adb_pot, &
+                & input_data_dir, output_data_dir, &
+                & bo_pot_kind, dp, Rmin, Rmax, dR
+        use data_au
+        use pot_param, only: morse_potential
+
+        character(2000):: filepath
+        integer:: I, pot_tk, pot_out_tk
+
+        select case(bo_pot_kind)
+            case ("on_nuclr_grid")
+                ! Compose full path and read potential data file with NR lines.
+                write(filepath,'(a,a)') adjustl(trim(input_data_dir)), adjustl(trim(adb_pot))  
+                print*, "BO Potential surfaces in path:", trim(filepath)
+                open(newunit=pot_tk,file=adjustl(trim(filepath)),status='unknown')
+                do I = 1, NR
+                    read(pot_tk,*) R(I), adb(I,:) !, sngl(adb(I,2)*au2eV), &
+                        ! &sngl(adb(i,3)*au2eV), sngl(adb(i,4)*au2eV), ad
+                end do
+                close(pot_tk)
+
+                ! Also write a copy into output directory for verification
+                write(filepath,'(a,a,a)') adjustl(trim(output_data_dir)), adjustl(trim(adb_pot)),&
+                        & "_read.out"  
+                open(newunit=pot_out_tk,file=adjustl(trim(filepath)),status='unknown')
+                do I = 1, NR
+                    write(pot_out_tk,*) R(I), adb(I,:) !, sngl(adb(I,2)*au2eV), &
+                        ! &sngl(adb(i,3)*au2eV), sngl(adb(i,4)*au2eV), ad
+                end do
+                close(pot_out_tk)
+ 
+            case("Morse")
+                ! Make R-grid spacing
+                dR = (Rmax-Rmin)/(NR-1)
+                ! Fill only the ground state with a Morse potential at specific grid points
+                do i = 1, NR
+                    R(i) = Rmin + (i-1)*dR
+                    adb(I,1) = morse_potential(0.17_dp,1.85_dp,0.743_dp/au2a,R(I))
+                enddo
+   
+                ! Write generated Morse surface to output 
+                write(filepath,'(a,a)') adjustl(trim(output_data_dir)), "Morse_pot_read.out"  
+                open(newunit=pot_out_tk,file=adjustl(trim(filepath)),status='unknown')
+                do I = 1, NR
+                    write(pot_out_tk,*) R(I), adb(I,:) !, sngl(adb(I,2)*au2eV), &
+                    ! &sngl(adb(i,3)*au2eV), sngl(adb(i,4)*au2eV), ad
+                end do
+                close(pot_out_tk)
+        end select
+    end subroutine bo_pot_read
     
     !> Read transition dipole moments for each electronic-state pair.
     !> Supports optional prefixing and allows switching off specific transitions.

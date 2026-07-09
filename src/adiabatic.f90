@@ -2,7 +2,7 @@ module adiabatic_mod
     use iso_c_binding, only: C_DOUBLE, C_PTR, C_SIZE_T
     use varprecision, only: dp
     use global_vars, only: NR, Nx, Nstates, R, x, Px, dR, dx, dt, &
-        & Pot, adb, ewf, mu_all, output_data_dir, ITP_par_FFTW
+        & Pot, adb, ewf, mu_all, output_data_dir, adiabatic_dir, ITP_par_FFTW
     use data_au, only: au2eV
     use FFTW3
     use omp_lib
@@ -27,6 +27,9 @@ module adiabatic_mod
         procedure :: write_bo_surface
         procedure :: write_transition_dipole_files
         procedure :: write_nonadiabatic_coupling_files
+        procedure :: write_ewf_binary
+        procedure :: check_adiabatic_data_exists
+        procedure :: read_adiabatic_data
         procedure :: adiabatic_wf_calc
     end type adiabatic_wavefkt_class
 
@@ -34,11 +37,22 @@ contains
 
     subroutine adiabatic_wf_calc(this)
         class(adiabatic_wavefkt_class), intent(inout) :: this
+        logical :: data_exists
         call this%read_params()
         call this%initialize_wp_params()
-        call this%imaginary_time_propagation()
-        call this%post_itp_calculations()
-        call this%write_output_files()
+
+        data_exists = this%check_adiabatic_data_exists()
+        if (data_exists) then
+            print*, 'Adiabatic data files found. Loading from disk...'
+            call this%read_adiabatic_data()
+            print*, 'Adiabatic data loaded successfully.'
+        else
+            print*, 'Adiabatic data files not found or incomplete. Running full ITP...'
+            call this%imaginary_time_propagation()
+            call this%post_itp_calculations()
+            call this%write_output_files()
+            call this%write_ewf_binary()
+        end if
     end subroutine adiabatic_wf_calc
 
     subroutine read_params(this)
@@ -224,6 +238,121 @@ contains
             end do
         end do
     end subroutine write_nonadiabatic_coupling_files
+
+    subroutine write_ewf_binary(this)
+        class(adiabatic_wavefkt_class), intent(inout) :: this
+        integer :: fd
+        character(500) :: fn
+        write(fn, '(a,a)') adjustl(trim(adiabatic_dir)), 'ewf.bin'
+        open(newunit=fd, file=trim(fn), status='replace', form='unformatted', access='stream')
+        write(fd) NR, Nx, Nstates
+        write(fd) ewf
+        close(fd)
+        print*, 'Electronic wavefunctions saved to ', trim(fn)
+    end subroutine write_ewf_binary
+
+    function check_adiabatic_data_exists(this) result(exists)
+        class(adiabatic_wavefkt_class), intent(in) :: this
+        logical :: exists
+        integer :: fd, L, M, ios
+        integer :: nr_chk, nx_chk, ns_chk
+        character(500) :: fn
+        logical :: file_ok
+
+        exists = .true.
+
+        ! 1. Check ewf binary file
+        write(fn, '(a,a)') adjustl(trim(adiabatic_dir)), 'ewf.bin'
+        open(newunit=fd, file=trim(fn), status='old', form='unformatted', access='stream', iostat=ios)
+        if (ios /= 0) then
+            print*, '  Missing: ', trim(fn)
+            exists = .false.
+        else
+            read(fd, iostat=ios) nr_chk, nx_chk, ns_chk
+            close(fd)
+            if (ios /= 0 .or. nr_chk /= NR .or. nx_chk /= Nx .or. ns_chk /= Nstates) then
+                print*, '  Incompatible grid dimensions in: ', trim(fn)
+                print*, '  Expected NR,Nx,Nstates:', NR, Nx, Nstates, &
+                    & ' Found:', nr_chk, nx_chk, ns_chk
+                exists = .false.
+            end if
+        end if
+
+        ! 2. Check H2+_BO.dat
+        write(fn, '(a,a)') adjustl(trim(output_data_dir)), '/H2+_BO.dat'
+        inquire(file=trim(fn), exist=file_ok)
+        if (.not. file_ok) then
+            print*, '  Missing: ', trim(fn)
+            exists = .false.
+        end if
+
+        ! 3. Check all transition dipole files
+        do L = 1, Nstates
+            do M = L + 1, Nstates
+                write(fn, '(a,a,i0,a,i0,a)') adjustl(trim(output_data_dir)), &
+                    & '/transition-dipole_', L, '-', M, '.out'
+                inquire(file=trim(fn), exist=file_ok)
+                if (.not. file_ok) then
+                    print*, '  Missing: ', trim(fn)
+                    exists = .false.
+                end if
+            end do
+        end do
+
+        if (.not. exists) then
+            print*, 'Some adiabatic data files are missing or invalid. Will run full ITP.'
+        end if
+    end function check_adiabatic_data_exists
+
+    subroutine read_adiabatic_data(this)
+        class(adiabatic_wavefkt_class), intent(inout) :: this
+        integer :: fd, I, L, M, J, N
+        integer :: nr_chk, nx_chk, ns_chk
+        character(500) :: fn
+        real(dp) :: dummy
+
+        ! 1. Read ewf from binary file
+        write(fn, '(a,a)') adjustl(trim(adiabatic_dir)), 'ewf.bin'
+        open(newunit=fd, file=trim(fn), status='old', form='unformatted', access='stream')
+        read(fd) nr_chk, nx_chk, ns_chk
+        read(fd) ewf
+        close(fd)
+
+        ! Populate this%ref from ewf (ref is indexed as ref(x, R, state))
+        do I = 1, NR
+            do J = 1, Nx
+                do N = 1, Nstates
+                    this%ref(J, I, N) = ewf(I, J, N)
+                end do
+            end do
+        end do
+
+        ! 2. Read adb from H2+_BO.dat
+        write(fn, '(a,a)') adjustl(trim(output_data_dir)), '/H2+_BO.dat'
+        open(newunit=fd, file=trim(fn), status='old', form='formatted')
+        read(fd, *)  ! skip header
+        do I = 1, NR
+            read(fd, *) dummy, adb(I, :)
+        end do
+        close(fd)
+
+        ! 3. Read mu_all from transition dipole files
+        do L = 1, Nstates
+            do M = L + 1, Nstates
+                write(fn, '(a,a,i0,a,i0,a)') adjustl(trim(output_data_dir)), &
+                    & '/transition-dipole_', L, '-', M, '.out'
+                open(newunit=fd, file=trim(fn), status='old', form='formatted')
+                read(fd, *)  ! skip header
+                do I = 1, NR
+                    read(fd, *) dummy, mu_all(L, M, I)
+                end do
+                close(fd)
+            end do
+        end do
+
+        ! 4. Recompute nonadiabatic couplings from ref
+        call this%compute_nonadiabatic_couplings()
+    end subroutine read_adiabatic_data
 
     subroutine eigenvalue_real(A, B, E, dt2)
         use global_vars, only: Nx

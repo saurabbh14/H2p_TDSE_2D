@@ -17,11 +17,11 @@ module ReadInputFile
       namelist /x_grid/Nx,xmin,xmax
       namelist /nucl_masses/m1,m2
       namelist /time_grid/dt,Nt
-      namelist /elec_states/Nstates, sc_kind
+      namelist /elec_states/Nstates, sc_kind, bo_pot_kind
       namelist /softcore_params/sc_params, CalcMode
       namelist /vib_states/guess_vstates
       namelist /ini_guess_wf/Ri, kappa
-      namelist /input_files/input_data_dir, trans_dip_prefix
+      namelist /input_files/input_data_dir, trans_dip_prefix, adb_pot
       namelist /output_files/output_data_dir
       namelist /trans_dip_off/total_trans_off, trans_off
       namelist /absorber_choice/absorber

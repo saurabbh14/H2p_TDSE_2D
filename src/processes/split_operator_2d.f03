@@ -68,8 +68,6 @@ contains
             
         case("velocity")
             call this%vprop_gen_vel()
-            ! Note: kprop_gen_vel(A) must be called per time-step with current A
-            ! from the main propagation loop (propagation_2d.f90)
         end select  
     end subroutine
 
@@ -117,21 +115,6 @@ contains
 
     end subroutine vprop_gen_len
 
-    !> Generate KH-gauge potential propagator (no E-field term — laser coupling in potential)
-    subroutine vprop_gen_kh(this, pot_kh)
-        use global_vars, only: dt, dp
-        use data_au, only: im
-        class(split_operator_2d_type), intent(inout) :: this
-        real(dp), intent(in) :: pot_kh(:,:)
-        integer :: j
-
-        do j = 1, size(pot_kh, 2)
-            this%vprop(:, j) = exp(-im * 0.5_dp * dt * pot_kh(:, j))
-        end do
-        this%vcol_prop = exp(-im * 0.5_dp * dt / size(pot_kh, 1))  ! dummy, not used in KH
-
-    end subroutine vprop_gen_kh
-
     subroutine vprop_gen_vel(this)
         use global_vars, only: dt, pot, dp, R
         use data_au, only: im
@@ -141,6 +124,18 @@ contains
         this%vcol_prop = exp(-im * 0.5_dp * dt / R)
         
     end subroutine vprop_gen_vel
+
+    !> Generate KH-gauge potential propagator (no E-field term — laser coupling in potential)
+    subroutine vprop_gen_kh(this, pot_kh)
+        use global_vars, only: dt, dp, R
+        use data_au, only: im
+        class(split_operator_2d_type), intent(inout) :: this
+        real(dp), intent(in) :: pot_kh(:,:)
+
+        this%vprop = exp(-im * 0.5_dp * dt * pot_kh)
+        this%vcol_prop = exp(-im * 0.5_dp * dt / R)  ! dummy, not used in KH
+
+    end subroutine vprop_gen_kh
 
     !> Apply split-operator step to wavefunction psi_ges
     subroutine split_operator_step(this, psi, region)
