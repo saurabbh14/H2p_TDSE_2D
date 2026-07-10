@@ -35,7 +35,6 @@ module propagation1d_mod
             integer:: vibpop_1d_tk, psi_outR_norm_1d_tk, psi_outR_Pdens_1d_tk
     contains
     procedure :: initialize
-    procedure :: read_pot_files      ! Reads vibrational state and energy files
     procedure :: ini_dist_choice     ! Initializes the wavefunction distribution
     procedure :: time_evolution      ! Main time propagation loop
     procedure :: localized_states_norm, expected_position
@@ -58,7 +57,6 @@ contains
         character(*), intent(in) :: propagator_method
         print*, "Preparing time propagation ..."
         call this%initialize()
-        call this%read_pot_files()
         call this%open_files_to_write()
         call this%write_headers_to_files()
         call this%ini_dist_choice()
@@ -78,60 +76,6 @@ contains
         allocate(this%psi_chi(guess_vstates))
         allocate(this%vib_en(guess_vstates,Nstates))
     end subroutine initialize
-
-    !> Reads vibrational state and energy files from disk
-    subroutine read_pot_files(this)
-        use global_vars, only: NR, Nstates, Vstates, output_data_dir, chi0
-        use varprecision, only: dp, sp
-        class(time_prop), intent(inout) :: this
-        character(30):: nucl_wp_path
-        character(150):: filepath
-        integer:: chi0_tk, vstates_tk, vib_en_tk
-        integer:: i, N, V, i_dummy
-        real(sp):: dummy
-
-        nucl_wp_path = "nuclear_wavepacket_data/"
-
-        ! implementation for reading potential files
-        write(filepath,'(a,a,a)') adjustl(trim(output_data_dir)), adjustl(trim(nucl_wp_path)), "Bound-vibstates_in_Nthstates.out"
-        call file_status_check(filepath)
-        open(newunit=vstates_tk,file=filepath,status='unknown')
-
-
-        this%chi0 = 0._dp
-        this%vib_en = 0._dp
-        do N = 1, Nstates 
-            print*
-            print*, "Reading vibrational states in the Electronic state ", N-1
-            print*
-
-            read(vstates_tk,*) i_dummy, Vstates(N)
-
-            write(filepath,'(a,a,a,i0,a)') adjustl(trim(output_data_dir)), adjustl(trim(nucl_wp_path)), &
-                & "BO_Electronic-state-g", int(N-1), "_Evib.out"
-            call file_status_check(filepath)
-            open(newunit=vib_en_tk,file=filepath,status='unknown')
-            do V = 1, Vstates(N)
-                read(vib_en_tk,*) i_dummy, this%vib_en(V,N)
-            enddo
-            close(vib_en_tk)
-
-            write(filepath,'(a,a,a,i0,a)') adjustl(trim(output_data_dir)), adjustl(trim(nucl_wp_path)), &
-                & "BO_Electronic-state-g", int(N-1), "_vibstates.out"
-            call file_status_check(filepath)
-            open(newunit=chi0_tk,file=filepath,status='unknown')
-            print*, "NR:", NR, "Vstates(N)", Vstates(N)
-
-            do i = 1, NR
-                read(chi0_tk,*) dummy, this%chi0(i,1:Vstates(N),N)
-                !print*, i, dummy, this%chi0(i,Vstates(N),N)
-            enddo 
-            close(chi0_tk)
-        enddo
-        chi0 = this%chi0 ! updating globally
-        print*, "Done reading the vibrational states files"
-        close(vstates_tk)
-    end subroutine read_pot_files
 
     !> Initializes the wavefunction distribution based on user choice
     subroutine ini_dist_choice(this)

@@ -21,7 +21,7 @@ module ReadInputFile
       namelist /softcore_params/sc_params, CalcMode
       namelist /vib_states/guess_vstates
       namelist /ini_guess_wf/Ri, kappa
-      namelist /input_files/input_data_dir, trans_dip_prefix, adb_pot
+      namelist /input_files/input_data_dir, adb_pot, trans_dip_prefix
       namelist /output_files/output_data_dir
       namelist /trans_dip_off/total_trans_off, trans_off
       namelist /absorber_choice/absorber

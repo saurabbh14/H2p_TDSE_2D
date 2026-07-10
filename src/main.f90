@@ -61,8 +61,10 @@ program TDSE_main
   ! Allocate arrays for computed vibrational states
   ! Vstates: eigenvalues/energies, chi0: wavefunctions (R, state index, vib index)
   allocate(Vstates(Nstates), chi0(NR,guess_vstates,Nstates))
+  allocate(vib_en(guess_vstates,Nstates))
   chi0 = 0._dp
- 
+  vib_en = 0._dp
+
   ! Compute vibrational eigenstates via Imaginary Time Propagation (ITP)
   call nwf_obj%nuclear_wf_calc
 
@@ -77,7 +79,7 @@ program TDSE_main
   call prop_2d%propagation_2D(pulse%El, pulse%Al, pulse%alpha_t, propagator_method)
 !
   ! Clean up allocated arrays and pulse internals
-  deallocate (adb, mu_all, chi0)
+  deallocate (adb, mu_all, chi0, vib_en)
   call pulse%deallocate_all()
 
   ! Final timing and report

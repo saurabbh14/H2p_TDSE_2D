@@ -242,6 +242,7 @@ contains
         use pot_param, only: morse_potential
 
         character(2000):: filepath
+        real(dp):: dummy
         integer:: I, pot_tk, pot_out_tk
 
         select case(bo_pot_kind)
@@ -251,7 +252,7 @@ contains
                 print*, "BO Potential surfaces in path:", trim(filepath)
                 open(newunit=pot_tk,file=adjustl(trim(filepath)),status='unknown')
                 do I = 1, NR
-                    read(pot_tk,*) R(I), adb(I,:) !, sngl(adb(I,2)*au2eV), &
+                    read(pot_tk,*) dummy, adb(I,:) !, sngl(adb(I,2)*au2eV), &
                         ! &sngl(adb(i,3)*au2eV), sngl(adb(i,4)*au2eV), ad
                 end do
                 close(pot_tk)

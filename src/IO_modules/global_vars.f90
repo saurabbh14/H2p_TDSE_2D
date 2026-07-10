@@ -9,6 +9,7 @@ module global_vars
     real(dp), allocatable :: chi0(:,:,:)        !1D vibrational potential and wavefunctions
     real(dp), allocatable, dimension(:,:,:) :: mu_all ! transition dipole arrays
     real(dp), allocatable, dimension(:,:) :: adb ! adiabatic BO potentials
+    real(dp), allocatable :: vib_en(:,:)        ! vibrational energies for all states
     real(dp) :: kap, lam                      ! derived coefficients used in dipole / kinetic expressions
     real(dp) :: dt                            ! time step 
     real(dp) :: dpr, dpx                      ! momentum-grid spacing

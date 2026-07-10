@@ -21,6 +21,7 @@ module nuclear_wavefkt
         integer :: not_converged_tk             ! File handle for unconverged states
     contains
         procedure :: read_guess_wp_params       ! Read initial parameters from global variables
+        procedure :: read_pot_files             ! Read existing vibrational states and energies
         procedure :: initialize_wp_params       ! Initialize/allocate arrays and convert units
         procedure :: open_files, open_not_converged_files ! Open output files for results
         procedure :: close_files                ! Close all opened files
@@ -187,6 +188,7 @@ contains
         Nloop: do J = 1, Nstates ! Loop over electronic states
             if (this%Files_exist(J)) then
                 print*, "Vibrational states already computed for state ", J-1, ". Skipping ITP."
+                call this%read_pot_files()  ! Read existing vibrational states and energies
                 cycle
             endif
 
@@ -311,6 +313,58 @@ contains
    
     end subroutine ITP
 
+    !> Reads vibrational state and energy files from disk
+    subroutine read_pot_files(this)
+        use global_vars, only: NR, Nstates, Vstates, output_data_dir, chi0, vib_en
+        use varprecision, only: dp, sp
+        class(nuclear_wavefkt_class), intent(inout) :: this
+        character(30):: nucl_wp_path
+        character(150):: filepath
+        integer:: chi0_tk, vstates_tk, vib_en_tk
+        integer:: i, N, V, i_dummy
+        real(sp):: dummy
+
+        nucl_wp_path = "nuclear_wavepacket_data/"
+
+        ! implementation for reading potential files
+        write(filepath,'(a,a,a)') adjustl(trim(output_data_dir)), adjustl(trim(nucl_wp_path)), "Bound-vibstates_in_Nthstates.out"
+        !call file_status_check(filepath) ! check if file is still being written to
+        open(newunit=vstates_tk,file=filepath,status='unknown')
+
+
+        chi0 = 0._dp
+        vib_en = 0._dp
+        do N = 1, Nstates 
+            print*
+            print*, "Reading vibrational states in the Electronic state ", N-1
+            print*
+
+            read(vstates_tk,*) i_dummy, Vstates(N)
+
+            write(filepath,'(a,a,a,i0,a)') adjustl(trim(output_data_dir)), adjustl(trim(nucl_wp_path)), &
+                & "BO_Electronic-state-g", int(N-1), "_Evib.out"
+            !call file_status_check(filepath) ! check if file is still being written to
+            open(newunit=vib_en_tk,file=filepath,status='unknown')
+            do V = 1, Vstates(N)
+                read(vib_en_tk,*) i_dummy, vib_en(V,N)
+            enddo
+            close(vib_en_tk)
+
+            write(filepath,'(a,a,a,i0,a)') adjustl(trim(output_data_dir)), adjustl(trim(nucl_wp_path)), &
+                & "BO_Electronic-state-g", int(N-1), "_vibstates.out"
+            !call file_status_check(filepath) ! check if file is still being written to
+            open(newunit=chi0_tk,file=filepath,status='unknown')
+            print*, "NR:", NR, "Vstates(N)", Vstates(N)
+
+            do i = 1, NR
+                read(chi0_tk,*) dummy, chi0(i,1:Vstates(N),N)
+            enddo 
+            close(chi0_tk)
+        enddo
+        print*, "Done reading the vibrational states files"
+        close(vstates_tk)
+    end subroutine read_pot_files
+
     !> A subroutine for deallocating all arrays
     subroutine deallocate_all(this)
         class(nuclear_wavefkt_class), intent(inout) :: this
@@ -361,7 +415,7 @@ contains
         C = C * dr
   
         return  
-      end subroutine integ_r
+    end subroutine integ_r
 
 end module nuclear_wavefkt
 

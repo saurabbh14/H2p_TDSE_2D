@@ -48,6 +48,9 @@ module propagation2d_mod
         integer :: field_2d_tk
         integer :: abs_R_tk, abs_x_tk
         integer :: psi_outR_norm_2d_tk, psi_outR_Pdens_2d_tk
+        ! KH-frame output files (for KH_td mode)
+        integer :: dens_x_kh_tk, dens_R_kh_tk
+        integer :: avgx_kh_2d_tk, avgR_kh_2d_tk
         
     contains
         ! Core API equivalent to 1D
@@ -328,6 +331,14 @@ contains
         ! time dependent momentum density of absorbed wavepacket 
         write(filepath, '(a,a)') adjustl(trim(time_prop_dir_2d)), "psi_outR_momt_density_2d_pm3d.out"
         open(newunit=this%psi_outR_Pdens_2d_tk,file=filepath,status='unknown') 
+
+        ! KH-frame outputs (for KH_td mode)
+        ! KH-frame x density
+        write(filepath, '(a,a)') adjustl(trim(time_prop_dir_2d)), "td-density_x_kh.out"
+        open(newunit=this%dens_x_kh_tk,file=filepath,status='unknown')
+        ! KH-frame average x
+        write(filepath, '(a,a)') adjustl(trim(time_prop_dir_2d)), "avgx_kh_2d.out"
+        open(newunit=this%avgx_kh_2d_tk,file=filepath,status='unknown')
     
     end subroutine open_files_to_write
 
@@ -508,9 +519,17 @@ contains
 
             ! write time dependent outputs to files
             write(this%avgR_2d_tk,*) time(k) * au2fs, evR !, sngl(epR)
-            write(this%avgx_2d_tk,*) time(k) * au2fs, evx !, sngl(epx)
             write(this%norm_2d_tk,*) time(k) * au2fs, norm 
-            write(this%field_2d_tk,*) time(k) * au2fs, E(k), A(K)
+            write(this%field_2d_tk,*) time(k) * au2fs, E(k), A(k)
+
+            if (trim(CalcMode) == "KH_td") then
+                ! Lab-frame avgx = KH-frame avgx - alpha(t)
+                write(this%avgx_2d_tk,*) time(k) * au2fs, evx + alpha_t(k)
+                ! KH-frame avgx (stored in separate file)
+                write(this%avgx_kh_2d_tk,*) time(k) * au2fs, evx
+            else
+                write(this%avgx_2d_tk,*) time(k) * au2fs, evx
+            end if
             
             if(mod(K,50).eq.0) then
                 ! R density map  
@@ -519,11 +538,24 @@ contains
                 enddo
                 write(this%dens_R_tk, *)
 
-                ! x density map  
-                do j = Nx/4, 3*Nx/4
-                    write(this%dens_x_tk,*) time(k) *au2fs, x(j), this%idensx(j)
-                enddo
-                write(this%dens_x_tk, *)
+                if (trim(CalcMode) == "KH_td") then
+                    ! Lab-frame x density: shift x-coordinate by -alpha(t)
+                    do j = Nx/4, 3*Nx/4
+                        write(this%dens_x_tk,*) time(k) *au2fs, x(j) + alpha_t(k), this%idensx(j)
+                    enddo
+                    write(this%dens_x_tk, *)
+                    ! KH-frame x density: unchanged coordinates
+                    do j = Nx/4, 3*Nx/4
+                        write(this%dens_x_kh_tk,*) time(k) *au2fs, x(j), this%idensx(j)
+                    enddo
+                    write(this%dens_x_kh_tk, *)
+                else
+                    ! x density map  
+                    do j = Nx/4, 3*Nx/4
+                        write(this%dens_x_tk,*) time(k) *au2fs, x(j), this%idensx(j)
+                    enddo
+                    write(this%dens_x_tk, *)
+                end if
             endif
 
             ! absorbed wavepacket
@@ -555,6 +587,9 @@ contains
         close(this%dens_R_tk)
         close(this%dens_x_tk)
         close(this%field_2d_tk)
+        ! Close KH-frame output files
+        close(this%dens_x_kh_tk)
+        close(this%avgx_kh_2d_tk)
 
         ! Destroy FFTW plans and free memory using encapsulated finalize
         select case(trim(adjustl(propagator_method)))
