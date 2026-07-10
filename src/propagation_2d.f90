@@ -13,6 +13,15 @@ module propagation2d_mod
     private
     public :: time_prop_2d, propagation_2D
 
+    ! Module-level private variables for dipole FFT operations
+    ! Shared 1D C2C FFT plans for x-direction (used by dipole_vel_x)
+    type(C_PTR), private :: planFx_dip, planBx_dip
+    type(C_PTR), private :: p_dip_in, p_dip_out
+    complex(C_DOUBLE_COMPLEX), pointer, private :: psi1d_in(:), psi1d_out(:)
+    ! Precomputed gradient of potential ∂V/∂x (used by dipole_acc_x)
+    real(dp), allocatable, private :: dpot_dx(:,:)
+    logical, private :: dip_plans_initialized = .false.
+
     !> Type to hold all data and methods for 2D time propagation
     type :: time_prop_2d
         logical :: initialized = .false.
@@ -51,6 +60,8 @@ module propagation2d_mod
         ! KH-frame output files (for KH_td mode)
         integer :: dens_x_kh_tk, dens_R_kh_tk
         integer :: avgx_kh_2d_tk, avgR_kh_2d_tk
+        ! Dipole observable output files
+        integer :: avgvelx_2d_tk, avgaccx_2d_tk
         
     contains
         ! Core API equivalent to 1D
@@ -339,6 +350,14 @@ contains
         ! KH-frame average x
         write(filepath, '(a,a)') adjustl(trim(time_prop_dir_2d)), "avgx_kh_2d.out"
         open(newunit=this%avgx_kh_2d_tk,file=filepath,status='unknown')
+
+        ! Dipole observable outputs
+        ! time dependent dipole velocity
+        write(filepath, '(a,a)') adjustl(trim(time_prop_dir_2d)), "avgvelx_2d.out"
+        open(newunit=this%avgvelx_2d_tk,file=filepath,status='unknown')
+        ! time dependent dipole acceleration
+        write(filepath, '(a,a)') adjustl(trim(time_prop_dir_2d)), "avgaccx_2d.out"
+        open(newunit=this%avgaccx_2d_tk,file=filepath,status='unknown')
     
     end subroutine open_files_to_write
 
@@ -356,7 +375,7 @@ contains
         type(rk4_operator_2d_type)   :: rk4_operator_2d
         integer :: i, j, k
         integer :: max_num_threads
-        real(dp) :: evR, evx, epx, epR
+        real(dp) :: evR, evx, velx, accx, epx, epR
         real(dp) :: norm
         real(dp) :: E(Nt), A(Nt)
         real(dp) :: alpha_t(Nt)
@@ -422,6 +441,9 @@ contains
             E_zero = 0._dp
             A_zero = 0._dp
         end if
+
+        ! Initialize shared 1D FFT plans for dipole velocity computation
+        call dipole_fft_init(Nx)
 
         timeloop: do k = 1, Nt
             if (mod(k,1000) .eq. 0 .and. time(k)*au2fs .lt. 100._dp) then
@@ -513,9 +535,10 @@ contains
             call integ_2D(this%psi, norm)
  
             evR = sum(dble(R(:) * this%idensR(:)))*dR
-            evx = sum(dble(x(:) * this%idensx(:)))*dx
             evR = evR / norm
-            evx = evx / norm
+            evx = dipole_x(this%psi, norm)
+            velx = dipole_vel_x(this%psi, norm)
+            accx = dipole_acc_x(this%psi, norm)
 
             ! write time dependent outputs to files
             write(this%avgR_2d_tk,*) time(k) * au2fs, evR !, sngl(epR)
@@ -523,13 +546,17 @@ contains
             write(this%field_2d_tk,*) time(k) * au2fs, E(k), A(k)
 
             if (trim(CalcMode) == "KH_td") then
-                ! Lab-frame avgx = KH-frame avgx - alpha(t)
+                ! Lab-frame avgx = KH-frame avgx + alpha(t)
                 write(this%avgx_2d_tk,*) time(k) * au2fs, evx + alpha_t(k)
                 ! KH-frame avgx (stored in separate file)
                 write(this%avgx_kh_2d_tk,*) time(k) * au2fs, evx
             else
                 write(this%avgx_2d_tk,*) time(k) * au2fs, evx
             end if
+
+            ! Write dipole velocity and acceleration
+            write(this%avgvelx_2d_tk,*) time(k) * au2fs, velx
+            write(this%avgaccx_2d_tk,*) time(k) * au2fs, accx
             
             if(mod(K,50).eq.0) then
                 ! R density map  
@@ -590,6 +617,12 @@ contains
         ! Close KH-frame output files
         close(this%dens_x_kh_tk)
         close(this%avgx_kh_2d_tk)
+        ! Close dipole observable output files
+        close(this%avgvelx_2d_tk)
+        close(this%avgaccx_2d_tk)
+
+        ! Clean up dipole FFT plans
+        call dipole_fft_finalize()
 
         ! Destroy FFTW plans and free memory using encapsulated finalize
         select case(trim(adjustl(propagator_method)))
@@ -729,40 +762,6 @@ contains
         return
     end subroutine
 
-! .......................................................................
-
-subroutine osc_dipole(psi, d_t1, d_t2,grad)
-
-use global_vars, only: NR, Nx, dx, dR
-
- implicit none
-
- integer:: I, J
- double precision,intent(out):: d_t1, d_t2(NR)
- double precision,intent(in)::grad(nr,nx)
- complex*16,intent(in):: psi(NR,Nx)
- 
- d_t1 = 0.d0
- d_t2 = 0.d0
-
- do i = 1, Nr
-  do j = 1, Nx
-   d_t2(i) = d_t2(i) + abs(psi(i,j))**2 * grad(i,j)    
-  end do
-   d_t2(i) = -d_t2(i) * dx
- end do 
- 
- 
- do i = 1, Nr
-  d_t1 = d_t1 + d_t2(i)
- end do
- 
-  d_t1 = d_t1 * dR
-  
-
-return 
-end subroutine
-
 !........................................................................
 
     subroutine localization(psi, time, ewf, K, trans_exp_pop)
@@ -888,6 +887,129 @@ end subroutine
         end select
 
     end subroutine mask_function_ex
+
+! ----------------------------------------------------------------------
+! Dipole observable functions (private to this module)
+! Shared 1D C2C FFT plans: created once, reused across time steps
+! ----------------------------------------------------------------------
+
+    !> Initialize 1D C2C FFT plans for dipole velocity computation
+    subroutine dipole_fft_init(Nx)
+        use FFTW3
+        integer, intent(in) :: Nx
+
+        if (dip_plans_initialized) return
+
+        p_dip_in = fftw_alloc_complex(int(Nx, C_SiZE_T))
+        call c_f_pointer(p_dip_in, psi1d_in, [Nx])
+        p_dip_out = fftw_alloc_complex(int(Nx, C_SiZE_T))
+        call c_f_pointer(p_dip_out, psi1d_out, [Nx])
+
+        call fftw_create_c2c_plans(psi1d_in, psi1d_out, Nx, planFx_dip, planBx_dip, "serial")
+
+        dip_plans_initialized = .true.
+        print*, "Dipole FFT plans initialized (1D C2C, size ", Nx, ")."
+
+    end subroutine dipole_fft_init
+
+    !> Destroy 1D C2C FFT plans and free memory
+    subroutine dipole_fft_finalize()
+        use FFTW3
+
+        if (.not. dip_plans_initialized) return
+
+        call fftw_destroy_plan(planFx_dip)
+        call fftw_destroy_plan(planBx_dip)
+        call fftw_free(p_dip_in)
+        call fftw_free(p_dip_out)
+        if (allocated(dpot_dx)) deallocate(dpot_dx)
+
+        dip_plans_initialized = .false.
+        print*, "Dipole FFT plans destroyed."
+
+    end subroutine dipole_fft_finalize
+
+    !> Compute dipole expectation value ⟨x⟩ via position-space quadrature.
+    !! dipole_x = ∫ x·|ψ|² dx dR / norm
+    function dipole_x(psi, norm) result(evx)
+        use global_vars, only: Nx, NR, x, dx, dR
+        complex(dp), intent(in) :: psi(NR, Nx)
+        real(dp), intent(in) :: norm
+        real(dp) :: evx
+        real(dp) :: idensx(Nx)
+        integer :: j
+
+        idensx = 0._dp
+        do j = 1, Nx
+            idensx(j) = sum(abs(psi(:,j))**2) * dR
+        end do
+        evx = sum(x(:) * idensx(:)) * dx / norm
+
+    end function dipole_x
+
+    !> Compute dipole velocity d⟨x⟩/dt = ⟨p_x⟩/m via 1D FFT along x-direction.
+    !! vel_x = (∫ Px·|ψ̃|² dpx dR) / (norm · m_eff)
+    !! Uses shared 1D C2C FFT plans (dipole_fft_init must be called first).
+    function dipole_vel_x(psi, norm) result(velx)
+        use FFTW3
+        use global_vars, only: Nx, NR, Px, dx, dR, m_eff
+        complex(dp), intent(in) :: psi(NR, Nx)
+        real(dp), intent(in) :: norm
+        real(dp) :: velx
+        real(dp) :: idenspx(Nx)
+        integer :: i, j
+
+        if (.not. dip_plans_initialized) then
+            print*, "ERROR: dipole_vel_x called before dipole_fft_init!"
+            velx = 0._dp
+            return
+        end if
+
+        idenspx = 0._dp
+        do i = 1, NR
+            psi1d_in(:) = (0._dp, 0._dp)
+            psi1d_out(:) = (0._dp, 0._dp)
+            psi1d_in(:) = psi(i, :)
+            call fftw_execute_dft(planFx_dip, psi1d_in, psi1d_out)
+            ! Normalize: FFTW forward transform is unnormalized
+            psi1d_in(:) = psi1d_out(:) / dble(Nx)
+            do j = 1, Nx
+                idenspx(j) = idenspx(j) + abs(psi1d_in(j))**2
+            end do
+        end do
+        velx = sum(Px(:) * idenspx(:)) * dR / norm / m_eff
+
+    end function dipole_vel_x
+
+    !> Compute dipole acceleration d²⟨x⟩/dt² = -⟨∂V/∂x⟩ / m_eff via Ehrenfest.
+    !! Precomputes ∂Pot/∂x once (static potential), then integrates:
+    !! acc_x = -∫ (∂Pot/∂x)·|ψ|² dx dR / (norm · m_eff)
+    function dipole_acc_x(psi, norm) result(accx)
+        use global_vars, only: pot, Nx, NR, x, dx, dR, m_eff
+        use differentiation, only: central_diff_on_grid
+        complex(dp), intent(in) :: psi(NR, Nx)
+        real(dp), intent(in) :: norm
+        real(dp) :: accx
+        real(dp) :: dpot_dx_row(Nx)
+        integer :: i, j
+
+        ! Precompute ∂Pot/∂x once on first call
+        if (.not. allocated(dpot_dx)) then
+            allocate(dpot_dx(NR, Nx))
+            do i = 1, NR
+                call central_diff_on_grid(pot(i,:), Nx, dx, dpot_dx_row)
+                dpot_dx(i, :) = dpot_dx_row(:)
+            end do
+            print*, "Dipole acceleration: ∂V/∂x precomputed."
+        end if
+
+        accx = 0._dp
+        do j = 1, Nx
+            accx = accx + sum(dpot_dx(:, j) * abs(psi(:, j))**2)
+        end do
+        accx = -accx * dx * dR / norm / m_eff
+
+    end function dipole_acc_x
 
 end module propagation2d_mod
 
