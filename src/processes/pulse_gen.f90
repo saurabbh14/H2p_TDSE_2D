@@ -473,10 +473,9 @@ contains
         real(dp), intent(in) :: t, tp, t_mid, alpha0, omega, phase, pulse_offset
         real(dp) :: gaussian_env, fwhm, theta
         real(dp) :: gaussian_electric_pulse
-        t = time - t_mid
-        theta = omega * (time-t_mid-pulse_offset) + phase
+        theta = omega * (t-t_mid-pulse_offset) + phase
         fwhm = (4._dp * log(2._dp)) / tp**2
-        gaussian_env = exp(-fwhm * t*t)
+        gaussian_env = exp(-fwhm * (t - t_mid)**2)
         gaussian_electric_pulse = alpha0 * gaussian_env * (t*t * 4._dp *fwhm * fwhm  &
             & + 2._dp * fwhm + omega * omega) * cos(theta)
     end function gaussian_electric_pulse
