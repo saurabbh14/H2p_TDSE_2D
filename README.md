@@ -237,8 +237,7 @@ All output is written to the specified output directory, organized into subdirec
 ---
 
 ## References
-
-If you use this code in your research, please cite the relevant publications. *[Add citations / DOIs here]*
+TODO
 
 ---
 
