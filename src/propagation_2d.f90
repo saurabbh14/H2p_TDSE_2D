@@ -537,8 +537,8 @@ contains
             evR = sum(dble(R(:) * this%idensR(:)))*dR
             evR = evR / norm
             evx = dipole_x(this%psi, norm)
-            velx = dipole_vel_x(this%psi, norm)
-            accx = dipole_acc_x(this%psi, norm)
+            velx = dipole_vel_x(this%psi, norm, A(k))
+            accx = dipole_acc_x(this%psi, norm, E(k))
 
             ! write time dependent outputs to files
             write(this%avgR_2d_tk,*) time(k) * au2fs, evR !, sngl(epR)
@@ -948,13 +948,15 @@ contains
     end function dipole_x
 
     !> Compute dipole velocity d⟨x⟩/dt = ⟨p_x⟩/m via 1D FFT along x-direction.
-    !! vel_x = (∫ Px·|ψ̃|² dpx dR) / (norm · m_eff)
+    !! Canonical momentum ⟨p_x⟩ is gauge-dependent:
+    !!   Length gauge:  v = ⟨p_x⟩/m_eff
+    !!   Velocity gauge: v = (⟨p_x⟩ + kap*A)/m_eff
     !! Uses shared 1D C2C FFT plans (dipole_fft_init must be called first).
-    function dipole_vel_x(psi, norm) result(velx)
+    function dipole_vel_x(psi, norm, A_k) result(velx)
         use FFTW3
-        use global_vars, only: Nx, NR, Px, dx, dR, m_eff
+        use global_vars, only: Nx, NR, Px, dx, dR, m_eff, kap, gauge_2d
         complex(dp), intent(in) :: psi(NR, Nx)
-        real(dp), intent(in) :: norm
+        real(dp), intent(in) :: norm, A_k
         real(dp) :: velx
         real(dp) :: idenspx(Nx)
         integer :: i, j
@@ -979,21 +981,27 @@ contains
         end do
         velx = sum(Px(:) * idenspx(:)) * dR / norm / m_eff
 
+        ! Velocity gauge: canonical momentum shifted by kap*A(t)
+        if (trim(adjustl(gauge_2d)) == "velocity") then
+            velx = velx + kap * A_k / m_eff
+        end if
+
     end function dipole_vel_x
 
-    !> Compute dipole acceleration d²⟨x⟩/dt² = -⟨∂V/∂x⟩ / m_eff via Ehrenfest.
-    !! Precomputes ∂Pot/∂x once (static potential), then integrates:
-    !! acc_x = -∫ (∂Pot/∂x)·|ψ|² dx dR / (norm · m_eff)
-    function dipole_acc_x(psi, norm) result(accx)
-        use global_vars, only: pot, Nx, NR, x, dx, dR, m_eff
+    !> Compute dipole acceleration d²⟨x⟩/dt² via Ehrenfest theorem.
+    !! Gauge-invariant formula: acc_x = -(⟨∂V₀/∂x⟩ + kap·E) / m_eff
+    !! where ∂V₀/∂x is the field-free potential gradient.
+    !! Precomputes ∂V₀/∂x once (static potential), then integrates.
+    function dipole_acc_x(psi, norm, E_k) result(accx)
+        use global_vars, only: pot, Nx, NR, dx, dR, m_eff, kap
         use differentiation, only: central_diff_on_grid
         complex(dp), intent(in) :: psi(NR, Nx)
-        real(dp), intent(in) :: norm
+        real(dp), intent(in) :: norm, E_k
         real(dp) :: accx
         real(dp) :: dpot_dx_row(Nx)
         integer :: i, j
 
-        ! Precompute ∂Pot/∂x once on first call
+        ! Precompute ∂V₀/∂x once on first call
         if (.not. allocated(dpot_dx)) then
             allocate(dpot_dx(NR, Nx))
             do i = 1, NR
@@ -1007,7 +1015,8 @@ contains
         do j = 1, Nx
             accx = accx + sum(dpot_dx(:, j) * abs(psi(:, j))**2)
         end do
-        accx = -accx * dx * dR / norm / m_eff
+        ! Ehrenfest: m * d²⟨x⟩/dt² = -⟨∂V₀/∂x⟩ - kap*E(t)
+        accx = -(accx * dx * dR / norm + kap * E_k) / m_eff
 
     end function dipole_acc_x
 
