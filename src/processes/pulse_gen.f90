@@ -407,30 +407,30 @@ contains
     end subroutine write_pulse_to_file
   
     ! pulse envelope functions %%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
-    function cos2(time, tp, t_mid, pulse_offset)
-        real(dp), intent(in) :: time, tp, t_mid, pulse_offset
+    function cos2(t, tp, t_mid, pulse_offset)
+        real(dp), intent(in) :: t, tp, t_mid, pulse_offset
         real(dp) :: cos2
-        if (time .gt. (t_mid+pulse_offset-tp/2) .and. time .lt. (t_mid+pulse_offset+tp/2)) then
-            cos2 = cos((time - t_mid-pulse_offset)*pi/tp)**2      
+        if (t .gt. (t_mid+pulse_offset-tp/2) .and. t .lt. (t_mid+pulse_offset+tp/2)) then
+            cos2 = cos((t - t_mid-pulse_offset)*pi/tp)**2      
         else
             cos2 = 0._dp
         endif
     end function cos2
 
-    function sin2(time, tp, t_mid, pulse_offset)
-        real(dp), intent(in) :: time, tp, t_mid, pulse_offset
+    function sin2(t, tp, t_mid, pulse_offset)
+        real(dp), intent(in) :: t, tp, t_mid, pulse_offset
         real(dp) :: sin2
-        if (time .gt. (t_mid+pulse_offset-tp/2) .and. time .lt. (t_mid+pulse_offset+tp/2)) then
-            sin2 = sin((time - t_mid-pulse_offset+tp/2)*pi/tp)**2      
+        if (t .gt. (t_mid+pulse_offset-tp/2) .and. t .lt. (t_mid+pulse_offset+tp/2)) then
+            sin2 = sin((t - t_mid-pulse_offset+tp/2)*pi/tp)**2      
         else
             sin2 = 0._dp
         endif
     end function sin2
 
-    function trapezoidal(time, tp, t_mid, rise_time, pulse_offset)
-        real(dp), intent(in) :: time, tp, t_mid, rise_time, pulse_offset
+    function trapezoidal(t, tp, t_mid, rise_time, pulse_offset)
+        real(dp), intent(in) :: t, tp, t_mid, rise_time, pulse_offset
         real(dp) :: trapezoidal, slope, yc, teff
-        teff = time - pulse_offset
+        teff = t - pulse_offset
         if (teff .ge. t_mid - (tp/2 + rise_time) .and. teff .le. t_mid - tp/2) then
             slope = 1._dp/rise_time
             yc = (t_mid - (tp/2 + rise_time)) * slope
@@ -446,73 +446,73 @@ contains
         endif
     end function trapezoidal
  
-    function gaussian(time, tp, t_mid)
+    function gaussian(t, tp, t_mid)
         implicit none
-        real(dp):: time, tp, t_mid
+        real(dp):: t, tp, t_mid
         real(dp):: gaussian, fwhm
  
         fwhm = (4._dp * log(2._dp)) / tp**2
-        gaussian = exp(-fwhm * (time - t_mid)**2)
+        gaussian = exp(-fwhm * (t - t_mid)**2)
     end function gaussian
 
     ! Analytic vector and electric fields %%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
-    function gaussian_vector_pulse(time, tp, t_mid, alpha0, omega, phase, pulse_offset)
+    function gaussian_vector_pulse(t, tp, t_mid, alpha0, omega, phase, pulse_offset)
         implicit none
-        real(dp), intent(in) :: time, tp, t_mid, alpha0, omega, phase, pulse_offset
-        real(dp) :: gaussian, fwhm, theta
+        real(dp), intent(in) :: t, tp, t_mid, alpha0, omega, phase, pulse_offset
+        real(dp) :: gaussian_env, fwhm, theta
         real(dp) :: gaussian_vector_pulse
-        theta = omega * (time-t_mid-pulse_offset) + phase
+        theta = omega * (t-t_mid-pulse_offset) + phase
         fwhm = (4._dp * log(2._dp)) / tp**2
-        gaussian = exp(-fwhm * (time - t_mid)**2)
-        gaussian_vector_pulse = -alpha0 * gaussian * ((time-t_mid) * 2._dp * fwhm * cos(theta) &
+        gaussian_env = exp(-fwhm * (t - t_mid)**2)
+        gaussian_vector_pulse = -alpha0 * gaussian_env * ((t-t_mid) * 2._dp * fwhm * cos(theta) &
             & + omega * sin(theta))
     end function gaussian_vector_pulse
 
-    function gaussian_electric_pulse(time, tp, t_mid, alpha0, omega, phase, pulse_offset)
+    function gaussian_electric_pulse(t, tp, t_mid, alpha0, omega, phase, pulse_offset)
         implicit none
-        real(dp), intent(in) :: time, tp, t_mid, alpha0, omega, phase, pulse_offset
-        real(dp) :: gaussian, fwhm, theta, t
+        real(dp), intent(in) :: t, tp, t_mid, alpha0, omega, phase, pulse_offset
+        real(dp) :: gaussian_env, fwhm, theta
         real(dp) :: gaussian_electric_pulse
         t = time - t_mid
         theta = omega * (time-t_mid-pulse_offset) + phase
         fwhm = (4._dp * log(2._dp)) / tp**2
-        gaussian = exp(-fwhm * t*t)
-        gaussian_electric_pulse = alpha0 * gaussian * (t*t * 4._dp *fwhm * fwhm  &
+        gaussian_env = exp(-fwhm * t*t)
+        gaussian_electric_pulse = alpha0 * gaussian_env * (t*t * 4._dp *fwhm * fwhm  &
             & + 2._dp * fwhm + omega * omega) * cos(theta)
     end function gaussian_electric_pulse
 
-    function sin2_vector_pulse(time, tp, t_mid, alpha0, omega, phase, pulse_offset)
+    function sin2_vector_pulse(t, tp, t_mid, alpha0, omega, phase, pulse_offset)
         implicit none
-        real(dp), intent(in) :: time, tp, t_mid, alpha0, omega, phase, pulse_offset
-        real(dp) :: sin2, theta, t_local, inv_tp
+        real(dp), intent(in) :: t, tp, t_mid, alpha0, omega, phase, pulse_offset
+        real(dp) :: sin2_env, theta, t_local, inv_tp
         real(dp) :: sin2_vector_pulse
-        if (time .gt. (t_mid+pulse_offset-tp/2) .and. time .lt. (t_mid+pulse_offset+tp/2)) then
-            t_local = time - t_mid - pulse_offset + tp/2
+        if (t .gt. (t_mid+pulse_offset-tp/2) .and. t .lt. (t_mid+pulse_offset+tp/2)) then
+            t_local = t - t_mid - pulse_offset + tp/2
             inv_tp = 1._dp/tp
             theta = omega * t_local + phase
-            sin2 = sin(pi * t_local * inv_tp)**2
+            sin2_env = sin(pi * t_local * inv_tp)**2
 
             sin2_vector_pulse = alpha0 * ( pi* inv_tp * sin(2._dp * pi * t_local * inv_tp) * sin(theta) &
-                & + omega * sin2 * cos(theta))
+                & + omega * sin2_env * cos(theta))
         else
             sin2_vector_pulse = 0._dp
         endif
     end function sin2_vector_pulse
 
-    function sin2_electric_pulse(time, tp, t_mid, alpha0, omega, phase, pulse_offset)
+    function sin2_electric_pulse(t, tp, t_mid, alpha0, omega, phase, pulse_offset)
         implicit none
-        real(dp), intent(in) :: time, tp, t_mid, alpha0, omega, phase, pulse_offset
-        real(dp) :: sin2, theta, t_local, inv_tp
+        real(dp), intent(in) :: t, tp, t_mid, alpha0, omega, phase, pulse_offset
+        real(dp) :: sin2_env, theta, t_local, inv_tp
         real(dp) :: sin2_electric_pulse
-        if (time .gt. (t_mid+pulse_offset-tp/2) .and. time .lt. (t_mid+pulse_offset+tp/2)) then
-            t_local = time - t_mid - pulse_offset + tp/2
+        if (t .gt. (t_mid+pulse_offset-tp/2) .and. t .lt. (t_mid+pulse_offset+tp/2)) then
+            t_local = t - t_mid - pulse_offset + tp/2
             inv_tp = 1._dp/tp
             theta = omega * t_local + phase
-            sin2 = sin(pi * t_local * inv_tp)**2
+            sin2_env = sin(pi * t_local * inv_tp)**2
 
             sin2_electric_pulse = -alpha0 * ( 2._dp * pi*pi * inv_tp*inv_tp * cos(2._dp * pi * t_local * inv_tp) & 
                 & * sin(theta) + 2._dp * omega * pi * inv_tp * sin(2._dp * pi * t_local * inv_tp) * cos(theta) &
-                & - omega * omega * sin2 * sin(theta))
+                & - omega * omega * sin2_env * sin(theta))
         else
             sin2_electric_pulse = 0._dp
         endif
@@ -522,8 +522,8 @@ contains
     !> integration constants so that A(t=0)=0 and A(t=TF)=0.
     !> The caller must pass an integer-cycle-adjusted rise_time (TU) for
     !> internal boundary matching between Case II and Case III.
-    function trapezoidal_vector_pulse(time, omega, phase, alpha0, tp, t_mid, pulse_offset, rise_time)
-        real(dp), intent(in) :: time, omega, phase, alpha0, tp, t_mid, pulse_offset, rise_time
+    function trapezoidal_vector_pulse(t, omega, phase, alpha0, tp, t_mid, pulse_offset, rise_time)
+        real(dp), intent(in) :: t, omega, phase, alpha0, tp, t_mid, pulse_offset, rise_time
         real(dp) :: trapezoidal_vector_pulse
         real(dp) :: t_start, t_local, theta, phi0
         real(dp) :: TU, TF
@@ -531,7 +531,7 @@ contains
         TU = rise_time
         TF = tp + 2._dp * TU
         t_start = t_mid - tp/2._dp - TU + pulse_offset
-        t_local = time - t_start
+        t_local = t - t_start
 
         ! Initial phase at pulse start
         phi0 = -omega * (tp/2._dp + TU) + phase
@@ -558,8 +558,8 @@ contains
     !> integration constants so that E(t=0)=0 and E(t=TF)=0.
     !> The caller must pass an integer-cycle-adjusted rise_time (TU) for
     !> internal boundary matching between Case II and Case III.
-    function trapezoidal_electric_pulse(time, omega, phase, alpha0, tp, t_mid, pulse_offset, rise_time)
-        real(dp), intent(in) :: time, omega, phase, alpha0, tp, t_mid, pulse_offset, rise_time
+    function trapezoidal_electric_pulse(t, omega, phase, alpha0, tp, t_mid, pulse_offset, rise_time)
+        real(dp), intent(in) :: t, omega, phase, alpha0, tp, t_mid, pulse_offset, rise_time
         real(dp) :: trapezoidal_electric_pulse
         real(dp) :: t_start, t_local, theta, phi0
         real(dp) :: TU, TF
@@ -567,7 +567,7 @@ contains
         TU = rise_time
         TF = tp + 2._dp * TU
         t_start = t_mid - tp/2._dp - TU + pulse_offset
-        t_local = time - t_start
+        t_local = t - t_start
 
         ! Initial phase at pulse start
         phi0 = -omega * (tp/2._dp + TU) + phase

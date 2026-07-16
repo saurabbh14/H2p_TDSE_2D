@@ -716,7 +716,7 @@ contains
 
     !........................................................................
 
-    subroutine pop_analysis(psi, time, ewf, trans_exp_pop, b)
+    subroutine pop_analysis(psi, currTime, ewf, trans_exp_pop, b)
 
         use global_vars, only: NR, Nx, Nstates, dx, dR
         use data_au, only: au2fs
@@ -725,7 +725,7 @@ contains
 
         integer:: I, N
 
-        double precision,intent(in):: time, ewf(Nx, NR, Nstates)
+        double precision,intent(in):: currTime, ewf(Nx, NR, Nstates)
         double precision:: B(Nstates)
         complex*16,intent(in):: psi(NR,Nx)
         complex*16:: a(NR,Nstates)
@@ -756,15 +756,15 @@ contains
 
         b = b * dR
 
-        write(500,*) time *au2fs, b(1)
-        write(501,*) time *au2fs, b(2) 
+        write(500,*) currTime *au2fs, b(1)
+        write(501,*) currTime *au2fs, b(2)  
    
         return
     end subroutine
 
 !........................................................................
 
-    subroutine localization(psi, time, ewf, K, trans_exp_pop)
+    subroutine localization(psi, currTime, ewf, K, trans_exp_pop)
     
     use global_vars, only: NR, Nx, Nstates, dx, dR
     use data_au, only: au2fs
@@ -772,7 +772,7 @@ contains
     
      integer:: I, K, N
     
-     double precision,intent(in):: time
+     double precision,intent(in):: currTime
      double precision,intent(in):: ewf(Nx,NR,Nstates)
      double precision:: B(Nstates), pl_loc(Nx,nR), neg_loc(nx,Nr)
      complex(kind=kind(0.d0)),intent(in):: psi(NR,Nx)
@@ -821,16 +821,16 @@ contains
      if(mod(K,100).eq.0) then  ! writing out the probability amplitudes
        do I = 1, NR
       
-        write(504,*) time*au2fs, R(I), abs(a(i,1))**2
-        write(505,*) time*au2fs, R(I), abs(a(i,2))**2
+        write(504,*) currTime*au2fs, R(I), abs(a(i,1))**2
+        write(505,*) currTime*au2fs, R(I), abs(a(i,2))**2
        end do
      
        write(504,*)
        write(505,*)
      end if
    
-      write(502,*) sngl(time *au2fs), b(1)
-      write(503,*) sngl(time *au2fs), b(2)
+      write(502,*) sngl(currTime *au2fs), b(1)
+      write(503,*) sngl(currTime *au2fs), b(2)
 
     return
     end subroutine
@@ -839,25 +839,25 @@ contains
 !............... Cut off Functions ................
 
     !> Generates complex absorber function for boundary
-    subroutine complex_absorber_function(R, NR, cpmR, v_abs, f)
+    subroutine complex_absorber_function(grid, NGrid, cpmR, v_abs, f)
         use global_vars, only: dp, dt
         
-        integer i, NR
-        real(dp):: a, eps, V_abs(NR), n, R0, p
-        real(dp):: R(NR), cpmR
-        complex(dp):: f(NR)
+        integer i, NGrid
+        real(dp):: a, eps, V_abs(NGrid), n, R0, p
+        real(dp):: grid(NGrid), cpmR
+        complex(dp):: f(NGrid)
     
         eps = epsilon(a) 
         print*, "Lower limit of the precision:", eps
         n = 4 ! power of absorber function
-        R0 = R(NR)- cpmR ! start of the absorber
+        R0 = grid(NGrid)- cpmR ! start of the absorber
         p = 20._dp ! optimal absorption momentum
-        a = -log(eps) *(n+1) *p / (2*(R(NR)-R0)**(n+1))
+        a = -log(eps) *(n+1) *p / (2*(grid(NGrid)-R0)**(n+1))
         print*, "Absorber prefactor a:", a
 
-        do i = 1, NR
-            if (R(i) .gt. abs(R0)) then
-                V_abs(i) = a*(R(i)-R0)**n
+        do i = 1, NGrid
+            if (grid(i) .gt. abs(R0)) then
+                V_abs(i) = a*(grid(i)-R0)**n
             else
                 V_abs(i) = 0._dp
             endif
@@ -866,23 +866,23 @@ contains
     end subroutine
 
     !> Generates mask absorber function (exponential)
-    subroutine mask_function_ex(R, NR, cpmR, c, cof, sides)
+    subroutine mask_function_ex(grid, NGrid, cpmR, c, cof, sides)
         use global_vars, only: dp
     
-        integer :: i, NR, sides
-        real(dp):: cof(NR),c, R(NR), cpmR
+        integer :: i, NGrid, sides
+        real(dp):: cof(NGrid),c, grid(NGrid), cpmR
   
         select case (sides)
         case(1) ! left boundary
-            do i = 1, NR
-                cof(i)=1.0d0/(1.0d0+exp(c*(R(i)-R(NR)+cpmR)))
+            do i = 1, NGrid
+                cof(i)=1.0d0/(1.0d0+exp(c*(grid(i)-grid(NGrid)+cpmR)))
             end do
         case(2) ! Both boundaries
-            do i = 1, NR
-                cof(i)=1.0d0/(1.0d0+exp(c*(R(i)-R(NR)+cpmR)))
+            do i = 1, NGrid
+                cof(i)=1.0d0/(1.0d0+exp(c*(grid(i)-grid(NGrid)+cpmR)))
             end do
-            do i = 1, NR/2
-                cof(i) = cof(NR-i+1)
+            do i = 1, NGrid/2
+                cof(i) = cof(NGrid-i+1)
             end do
         end select
 
@@ -894,21 +894,21 @@ contains
 ! ----------------------------------------------------------------------
 
     !> Initialize 1D C2C FFT plans for dipole velocity computation
-    subroutine dipole_fft_init(Nx)
+    subroutine dipole_fft_init(Ngrid)
         use FFTW3
-        integer, intent(in) :: Nx
+        integer, intent(in) :: Ngrid
 
         if (dip_plans_initialized) return
 
-        p_dip_in = fftw_alloc_complex(int(Nx, C_SiZE_T))
-        call c_f_pointer(p_dip_in, psi1d_in, [Nx])
-        p_dip_out = fftw_alloc_complex(int(Nx, C_SiZE_T))
-        call c_f_pointer(p_dip_out, psi1d_out, [Nx])
+        p_dip_in = fftw_alloc_complex(int(Ngrid, C_SiZE_T))
+        call c_f_pointer(p_dip_in, psi1d_in, [Ngrid])
+        p_dip_out = fftw_alloc_complex(int(Ngrid, C_SiZE_T))
+        call c_f_pointer(p_dip_out, psi1d_out, [Ngrid])
 
-        call fftw_create_c2c_plans(psi1d_in, psi1d_out, Nx, planFx_dip, planBx_dip, "serial")
+        call fftw_create_c2c_plans(psi1d_in, psi1d_out, Ngrid, planFx_dip, planBx_dip, "serial")
 
         dip_plans_initialized = .true.
-        print*, "Dipole FFT plans initialized (1D C2C, size ", Nx, ")."
+        print*, "Dipole FFT plans initialized (1D C2C, size ", Ngrid, ")."
 
     end subroutine dipole_fft_init
 
