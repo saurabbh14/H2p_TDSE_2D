@@ -11,6 +11,8 @@ module rk4_operator_2d_mod
         character(20) :: gauge ! Gauge Type: "length" or "velocity"
         ! Kinetic energy factor in momentum space: pR²/(2*m_red) + 0.5*px²
         real(dp), allocatable :: kin_energy(:,:)
+        ! Shifted kinetic energy (velocity gauge only): (pR+lam*A)²/(2*m_red) + 0.5*(px+kap*A)²
+        real(dp), allocatable :: kin_shifted(:,:)
         ! FFTW plan and memory pointers
         type(C_PTR) :: planF, planB, p_in, p_out
         ! FFTW input/output arrays
@@ -52,6 +54,12 @@ contains
         allocate(this%kin_energy(NR, Nx))
         call this%kin_energy_gen()
 
+        ! Pre-allocate shifted kinetic energy for velocity gauge (avoids per-RHS allocations)
+        if (trim(adjustl(this%gauge)) == "velocity") then
+            allocate(this%kin_shifted(NR, Nx))
+            print*, "RK4 2D: Pre-allocated kin_shifted for velocity gauge."
+        end if
+
     end subroutine fft_initialize
 
     !> Pre-compute kinetic energy: pR²/(2*m_red) + 0.5*px²
@@ -83,7 +91,6 @@ contains
         real(dp), intent(in)     :: pot(NR, Nx)
 
         integer :: j
-        real(dp), allocatable :: kin_shifted(:,:)
 
         ! Start with psi_rhs = 0
         psi_rhs = (0._dp, 0._dp)
@@ -101,13 +108,11 @@ contains
         case("velocity")
             ! Compute shifted kinetic energy on the fly:
             ! (pR + lam*A)²/(2*m_red) + 0.5*(px + kap*A)²
-            allocate(kin_shifted(NR, Nx))
             do j = 1, Nx
-                kin_shifted(:, j) = (pR(:) + lam * A_field)**2 / (2._dp * m_red) &
+                this%kin_shifted(:, j) = (pR(:) + lam * A_field)**2 / (2._dp * m_red) &
                     & + 0.5_dp * (px(j) + kap * A_field)**2
             end do
-            this%psi_in = this%psi_out * kin_shifted
-            deallocate(kin_shifted)
+            this%psi_in = this%psi_out * this%kin_shifted
         end select
 
         call fftw_execute_dft(this%planB, this%psi_in, this%psi_out)
@@ -226,6 +231,7 @@ contains
         call fftw_free(this%p_in)
         call fftw_free(this%p_out)
         if (allocated(this%kin_energy)) deallocate(this%kin_energy)
+        if (allocated(this%kin_shifted)) deallocate(this%kin_shifted)
 
     end subroutine finalize
 

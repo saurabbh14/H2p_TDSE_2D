@@ -146,6 +146,10 @@ contains
         if(allocated(this%idensx)) deallocate(this%idensx)
         if(allocated(this%idenspR)) deallocate(this%idenspR)
         if(allocated(this%idenspx)) deallocate(this%idenspx)
+        if(allocated(this%psi_bound)) deallocate(this%psi_bound)
+        if(allocated(this%psi_diss)) deallocate(this%psi_diss)
+        if(allocated(this%psi_diss_g)) deallocate(this%psi_diss_g)
+        if(allocated(this%psi_diss_u)) deallocate(this%psi_diss_u)
 
         print*, "Done."
     end subroutine deallocate_all
@@ -974,10 +978,8 @@ contains
             psi1d_in(:) = psi(i, :)
             call fftw_execute_dft(planFx_dip, psi1d_in, psi1d_out)
             ! Normalize: FFTW forward transform is unnormalized
-            psi1d_in(:) = psi1d_out(:) / dble(Nx)
-            do j = 1, Nx
-                idenspx(j) = idenspx(j) + abs(psi1d_in(j))**2
-            end do
+            psi1d_in(:) = psi1d_out(:) / sqrt(dble(Nx))
+            idenspx(:) = idenspx(:) + abs(psi1d_in(:))**2
         end do
         velx = sum(Px(:) * idenspx(:)) * dR / norm / m_eff
 
@@ -1021,4 +1023,3 @@ contains
     end function dipole_acc_x
 
 end module propagation2d_mod
-
