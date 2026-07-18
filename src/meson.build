@@ -10,11 +10,11 @@ fftw3_omp = declare_dependency(
 subdir('IO_modules')
 subdir('libs')
 subdir('processes')
-prog_sources = files('main.f90',
-           'nuclear_wv.f90',
-           'adiabatic.f90',
-           'propagation.f90',
-           'propagation_2d.f90')
+prog_sources = files('main.f08',
+           'nuclear_wv.f08',
+           'adiabatic.f08',
+           'propagation.f08',
+           'propagation_2d.f08')
 
 incdir = include_directories('IO_modules', 
                     'libs',

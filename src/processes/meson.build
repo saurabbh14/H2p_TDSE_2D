@@ -1,10 +1,10 @@
 processes_sources = files(
-    'split_operator.f03', 
-    'split_operator_2d.f03',
-    'rk4_operator.f03',
-    'rk4_operator_2d.f03',
-    'continuum_1d.f03',
-    'initializer.f90', 
-    'setpot.f90',
-    'pulse_gen.f90'
+    'split_operator.f08', 
+    'split_operator_2d.f08',
+    'rk4_operator.f08',
+    'rk4_operator_2d.f08',
+    'continuum_1d.f08',
+    'initializer.f08', 
+    'setpot.f08',
+    'pulse_gen.f08'
     )
