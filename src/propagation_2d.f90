@@ -958,7 +958,7 @@ contains
     !! Uses shared 1D C2C FFT plans (dipole_fft_init must be called first).
     function dipole_vel_x(psi, norm, A_k) result(velx)
         use FFTW3
-        use global_vars, only: Nx, NR, Px, dx, dR, m_eff, kap, gauge_2d
+        use global_vars, only: Nx, NR, Px, dpx, dx, dR, m_eff, kap, gauge_2d
         complex(dp), intent(in) :: psi(NR, Nx)
         real(dp), intent(in) :: norm, A_k
         real(dp) :: velx
@@ -981,7 +981,7 @@ contains
             psi1d_in(:) = psi1d_out(:) / sqrt(dble(Nx))
             idenspx(:) = idenspx(:) + abs(psi1d_in(:))**2
         end do
-        velx = sum(Px(:) * idenspx(:)) * dR / norm / m_eff
+        velx = sum(Px(:) * idenspx(:)) * dx * dR / norm / m_eff
 
         ! Velocity gauge: canonical momentum shifted by kap*A(t)
         if (trim(adjustl(gauge_2d)) == "velocity") then
