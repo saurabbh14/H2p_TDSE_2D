@@ -30,7 +30,7 @@ RI    = 0.7      # center of initial Gaussian (Angstrom)
 kappa = -5.0     # width of initial Gaussian (negative)
 
 [initial_state]
-distribution = "single_vibrational"  # "single_vibrational" | "gaussian" | "boltzmann"
+distribution = "single vibrational state"  # "single vibrational state" | "gaussian distribution" | "Boltzmann distribution"
 N_ini        = 1          # initial electronic state index
 v_ini        = 1          # initial vibrational state index
 RI_tdse      = 1.5        # Gaussian center for TDSE (Angstrom)

@@ -59,7 +59,7 @@ contains
         kappa = cfg%get_real("initial_guess", "kappa", -5.0_dp)
 
         ! ----- initial_state (TDSE) -----
-        buf                  = cfg%get_string("initial_state", "distribution", "single_vibrational")
+        buf                  = cfg%get_string("initial_state", "distribution", "single vibrational state")
         initial_distribution = trim(buf)
         N_ini      = cfg%get_int  ("initial_state", "N_ini",      1)
         v_ini      = cfg%get_int  ("initial_state", "v_ini",      1)
