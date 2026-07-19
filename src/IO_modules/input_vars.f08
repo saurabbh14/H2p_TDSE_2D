@@ -1,10 +1,20 @@
 !> High-level input variables read from input file.
 !> These are the *declarative* variables describing the simulation setup.
-!> Keep names and comments in sync with readinputmodule.f90.  
 module InputVars
-    use CommandLineModule
     use VarPrecision, only: dp, idp
     use, intrinsic :: iso_c_binding
+    implicit none
+
+    !> Per-laser parameters — one instance per [[laser.pulses]] entry
+    type :: LaserParams
+        character(150) :: envelope = ""    ! "sin2" | "cos2" | "gaussian" | "trapezoidal"
+        real(dp) :: lambda    = 0._dp      ! wavelength (nm)
+        real(dp) :: tp        = 0._dp      ! pulse duration (fs)
+        real(dp) :: t_mid     = 0._dp      ! pulse midpoint (fs)
+        real(dp) :: alpha0    = 0._dp      ! quiver amplitude (a.u.)
+        real(dp) :: phi       = 0._dp      ! carrier-envelope phase (units of pi)
+        real(dp) :: rise_time = 0._dp      ! rise/fall time (fs) — trapezoidal only
+    end type LaserParams
 
     ! R-grid
     integer(C_INT):: NR, Nx                    ! number of grid points (coordinate space)
@@ -62,5 +72,9 @@ module InputVars
 
     ! Gauge selection for propagation
     character(20):: gauge_2d  ! "length" | "velocity"
+
+    ! Laser pulses — allocatable array populated from TOML [[laser.pulses]]
+    integer :: N_lasers = 0
+    type(LaserParams), allocatable :: lasers(:)
     
 end module InputVars

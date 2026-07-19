@@ -42,8 +42,6 @@ program TDSE_main
   input_path%path = trim(cmd_line%input)
   call input_path%read()
 
-  ! Read pulse parameters from input file
-  call pulse%read(input_path%path)
   print*, "Done reading input"
   print*, "_________________________"
 
@@ -53,7 +51,7 @@ program TDSE_main
   ! Print and initialize pulse parameters
   print*, "Printing input variables"
   call print_input_vars()
-  call pulse%initialize()
+  call pulse%initialize(lasers, N_lasers)
   call pulse%param_print()
 
   call awf_obj%adiabatic_wf_calc()
@@ -70,7 +68,6 @@ program TDSE_main
 
   ! Generate and store pulse(s) then run time propagation
   call pulse%generate()
-
   print*
   print*, "Time dependent calcuations"
 

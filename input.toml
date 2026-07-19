@@ -1,0 +1,74 @@
+# TDSE 2D — Simulation Input File
+# This file replaces the old Fortran namelist input.ini
+# All lengths in Angstrom (1 Å = 10^-10 m), times in femtoseconds,
+# wavelengths in nm, phases in units of pi, quiver amplitude in a.u.
+
+[grid]
+R_points  = 512        # number of R-grid points (NR)
+R_min     = 0.1        # minimum R in Angstrom
+R_max     = 51.2       # maximum R in Angstrom
+x_points  = 1024       # number of x-grid points (Nx)
+x_min     = -102.4     # minimum x in Angstrom
+x_max     = 102.4      # maximum x in Angstrom
+
+[system]
+m1            = 1.0          # mass of nucleus 1 (amu)
+m2            = 1.0          # mass of nucleus 2 (amu)
+Nstates       = 2            # number of electronic BO states
+sc_kind       = "on_grid"    # "on_grid" or "static"
+sc_params     = "Z_interpolated_optimized_a2_parameters_with_go.txt"
+bo_pot_kind   = "on_nuclr_grid"  # "on_nuclr_grid" or "Morse"
+CalcMode      = "Lab"        # "Lab", "KH", or "KH_td"
+guess_vstates = 100          # max vibrational states to compute
+
+[time]
+dt = 0.05        # time step in a.u.
+Nt = 25000       # number of time steps
+
+[initial_guess]
+RI    = 0.7      # center of initial Gaussian (Angstrom)
+kappa = -5.0     # width of initial Gaussian (negative)
+
+[initial_state]
+distribution = "single_vibrational"  # "single_vibrational" | "gaussian" | "boltzmann"
+N_ini        = 1          # initial electronic state index
+v_ini        = 1          # initial vibrational state index
+RI_tdse      = 1.5        # Gaussian center for TDSE (Angstrom)
+kappa_tdse   = -5.0       # Gaussian std dev for TDSE
+
+[io]
+input_data_dir   = "input_data/"
+output_data_dir  = "output_data/"
+adb_pot          = "H2+_BO.dat"
+trans_dip_prefix = ""
+
+[methods]
+absorber        = "mask"           # "mask" or "CAP"
+propagator      = "split_operator" # "split_operator" or "rk4"
+gauge           = "length"         # "length" or "velocity"
+total_trans_off = 0
+trans_off       = ""
+
+[parallel]
+prop_fftw     = "parallel"   # "parallel" or ""
+itp_fftw      = ""           # "parallel" or ""
+omp_nthreads  = 0            # 0 = use all available threads
+
+# Laser pulses — add as many [[laser.pulses]] blocks as needed
+[[laser.pulses]]
+envelope  = "sin2"       # "cos2" | "sin2" | "gaussian" | "trapezoidal"
+lambda    = 228.0        # wavelength in nm
+tp        = 8.0          # pulse duration in fs (FWHM for gaussian, total width for sin2/cos2, flat-top for trapezoidal)
+t_mid     = 15.0         # pulse midpoint in fs
+alpha0    = 2.5          # quiver amplitude in a.u.
+phi       = 0.0          # carrier-envelope phase in units of pi
+rise_time = 4.0          # rise/fall time in fs (only used for trapezoidal)
+
+[[laser.pulses]]
+envelope  = "trapezoidal"
+lambda    = 800.0
+tp        = 0.0
+t_mid     = 0.0
+alpha0    = 0.0
+phi       = 0.0
+rise_time = 0.0

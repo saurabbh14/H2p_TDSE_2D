@@ -1,7 +1,9 @@
 !> This module contains the subroutine for generating the laser pulse
-!> and the envelope functions.
+!> and the envelope functions.  Uses an allocatable array of per-pulse
+!> parameters so any number of lasers (1..N) can be defined.
 module pulse_mod
     use global_vars, only: dp, Nt, output_data_dir, dt, time
+    use InputVars,    only: LaserParams
     use data_au
     use FFTW3
     use omp_lib
@@ -9,301 +11,223 @@ module pulse_mod
     private
     public:: pulse_param
 
-    type :: pulse_param
-        character(150) :: envelope_shape_laser1, envelope_shape_laser2
-        real(dp) :: tp1, fwhm, t_mid1, rise_time1
-        real(dp) :: tp2, t_mid2, rise_time2
-        real(dp) :: alpha01, alpha02, phi1, phi2
-        real(dp) :: lambda1, lambda2
-        real(dp) :: omega1, omega2
-        real(dp) :: pulse_offset1, pulse_offset2
-        real(dp), allocatable :: alpha_t(:)
-        real(dp), allocatable :: alpha_t1(:), alpha_t2(:)
-        real(dp), allocatable :: El(:), Al(:)
-        real(dp), allocatable :: E21(:), E22(:)
-        real(dp), allocatable :: A21(:), A22(:)
-        real(dp), allocatable :: g1(:), g2(:)
-  
-    contains
+    !> Internal per-pulse data — one instance per laser
+    type :: single_pulse_data
+        character(150) :: envelope_shape = ""
+        real(dp) :: lambda     = 0._dp     ! wavelength in a.u. after init
+        real(dp) :: omega      = 0._dp     ! angular frequency in a.u.
+        real(dp) :: tp         = 0._dp     ! pulse duration in a.u.
+        real(dp) :: t_mid      = 0._dp     ! pulse midpoint in a.u.
+        real(dp) :: alpha0     = 0._dp     ! quiver amplitude in a.u.
+        real(dp) :: phi        = 0._dp     ! phase in rad
+        real(dp) :: rise_time  = 0._dp     ! rise time in a.u. (trapezoidal)
+        real(dp) :: pulse_offset = 0._dp   ! internal offset (always 0 for now)
+        real(dp), allocatable :: alpha_t(:)   ! quiver field  alpha(t)
+        real(dp), allocatable :: E_field(:)   ! electric field E(t)
+        real(dp), allocatable :: A_field(:)   ! vector potential A(t)
+        real(dp), allocatable :: env(:)       ! envelope g(t)
+    end type single_pulse_data
 
-        procedure :: read => read_pulse_params
-        procedure :: initialize => initialize_pulse_param
-        procedure :: param_print => print_pulse_param
-        procedure :: generate => generate_pulse
+    !> Main pulse object — holds an array of pulses plus the total fields.
+    type :: pulse_param
+        integer :: N_pulses = 0
+        type(single_pulse_data), allocatable :: pulses(:)
+        real(dp), allocatable :: alpha_t(:)   ! total quiver field
+        real(dp), allocatable :: El(:)        ! total electric field
+        real(dp), allocatable :: Al(:)        ! total vector potential
+    contains
+        procedure :: initialize    => initialize_from_lasers
+        procedure :: param_print   => print_pulse_param
+        procedure :: generate      => generate_pulse
         procedure :: write_to_file => write_pulse_to_file
         procedure :: deallocate_env => deallocate_envelope
         procedure :: deallocate_field => deallocate_field
-        procedure :: spectra => field_spectra
+        procedure :: spectra       => field_spectra
         procedure :: deallocate_all
     end type pulse_param
 
 contains
-  
-    ! Read pulse parameters from the input file
-    subroutine read_pulse_params(this, input_path)
+
+    !> Initialise internal pulse data from the LaserParams array read by
+    !> the input module.  Replaces the old read_pulse_params (no file I/O).
+    subroutine initialize_from_lasers(this, input_lasers, N_lasers)
         class(pulse_param), intent(inout) :: this
-        character(2000), intent(in) :: input_path
-        ! file tokens
-        integer :: input_tk
+        type(LaserParams), intent(in)     :: input_lasers(:)
+        integer, intent(in)               :: N_lasers
+        integer :: i
 
-        ! Intermediate variables for pulse_param components
-        character(150) :: envelope_shape_laser1, envelope_shape_laser2
-        real(dp) :: lambda1, lambda2, tp1, tp2, t_mid1, t_mid2
-        real(dp) :: alpha01, alpha02, phi1, phi2, rise_time1, rise_time2
+        this%N_pulses = N_lasers
+        allocate(this%pulses(N_lasers))
 
-        namelist /laser_param/envelope_shape_laser1, envelope_shape_laser2, &
-        & lambda1, lambda2, tp1, tp2, t_mid1, t_mid2, alpha01, alpha02, & 
-        & phi1, phi2, rise_time1, rise_time2
+        do i = 1, N_lasers
+            associate(pl => this%pulses(i), inp => input_lasers(i))
+                pl%envelope_shape = inp%envelope
+                pl%lambda     = inp%lambda
+                pl%tp         = inp%tp
+                pl%t_mid      = inp%t_mid
+                pl%alpha0     = inp%alpha0
+                pl%phi        = inp%phi
+                pl%rise_time  = inp%rise_time
+                pl%pulse_offset = 0._dp
+            end associate
+        end do
 
-        open(newunit=input_tk, file=adjustl(trim(input_path)), status='old')
-        read(input_tk,nml=laser_param)
-        close(input_tk)
+        ! Convert units and compute derived quantities
+        do i = 1, N_lasers
+            associate(pl => this%pulses(i))
+                pl%tp        = pl%tp        / au2fs
+                pl%t_mid     = pl%t_mid     / au2fs
+                pl%rise_time = pl%rise_time / au2fs
+                pl%omega     = (1._dp / (pl%lambda * 1.e-7_dp)) * cm2au
+                pl%phi       = pl%phi       * pi
+            end associate
+        end do
+    end subroutine initialize_from_lasers
 
-        ! Assign values to the pulse_param components
-        this%envelope_shape_laser1 = envelope_shape_laser1
-        this%envelope_shape_laser2 = envelope_shape_laser2
-        this%lambda1 = lambda1
-        this%lambda2 = lambda2
-        this%tp1 = tp1
-        this%tp2 = tp2
-        this%t_mid1 = t_mid1
-        this%t_mid2 = t_mid2
-        this%alpha01 = alpha01
-        this%alpha02 = alpha02
-        this%phi1 = phi1
-        this%phi2 = phi2
-        this%rise_time1 = rise_time1
-        this%rise_time2 = rise_time2
-    end subroutine read_pulse_params
-    
-    ! A subroutine for printing the pulse parameters
+    !> Print all pulse parameters.
     subroutine print_pulse_param(this)
         class(pulse_param), intent(in) :: this
+        integer :: i
+        real(dp) :: field_strength, intensity
+
         print*, "Laser parameters:"
-        print*, "Laser #1:"
-        print*, "Envelope shape:", trim(this%envelope_shape_laser1)
-        print*, "Lambda:", this%lambda1, "nm"
-        print*, "Quiver amplitude (alpha0):", this%alpha01, "a.u."
-        print*, "Electric field strength (derived):", this%alpha01 * this%omega1**2, "a.u."
-        print*, "Pulse width (tp):", this%tp1 * au2fs, "fs"
-        print*, "Pulse midpoint:", this%t_mid1 * au2fs, "fs"
-        print*, "phi1:", this%phi1, "pi"
-        print*, "Rise time:", this%rise_time1 * au2fs, "fs"
-        print*, "Laser #2:"
-        print*, "Envelope shape:", trim(this%envelope_shape_laser2)
-        print*, "Lambda:", this%lambda2, "nm"
-        print*, "Quiver amplitude (alpha0):", this%alpha02, "a.u."
-        print*, "Electric field strength (derived):", this%alpha02 * this%omega2**2, "a.u."
-        print*, "Pulse width (tp):", this%tp2 * au2fs, "fs"
-        print*, "Pulse midpoint:", this%t_mid2 * au2fs, "fs"
-        print*, "phi2:", this%phi2, "pi"
-        print*, "Rise time:", this%rise_time2 * au2fs, "fs"
-        print*, "------------------------------------------------------"
-        print*, "Final pulse parameters:"
-        print*, "Wavelength 1 =", sngl(this%lambda1), "nm"
-        print*, "Phase 1 =", sngl(this%phi1)
-        print*, "Quiver amplitude 1 =", sngl(this%alpha01), "a.u."
-        print*, "Field strength 1 =", sngl(this%alpha01 * this%omega1**2), "a.u."
-        print*, "Intensity 1 =", sngl((this%alpha01 * this%omega1**2)**2 * 3.509e16_dp), "W/cm2"
-        print*, "Wavelength 2 =", sngl(this%lambda2), "nm"
-        print*, "Phase 2 =", sngl(this%phi2)
-        print*, "Quiver amplitude 2 =", sngl(this%alpha02), "a.u."
-        print*, "Field strength 2 =", sngl(this%alpha02 * this%omega2**2), "a.u."
-        print*, "Intensity 2 =", sngl((this%alpha02 * this%omega2**2)**2 * 3.509e16_dp), "W/cm2"
-        print*, "Wave duration =", sngl(this%tp1*au2fs), "fs"
+        print*, "Number of pulses:", this%N_pulses
+        do i = 1, this%N_pulses
+            associate(pl => this%pulses(i))
+                field_strength = pl%alpha0 * pl%omega**2
+                intensity      = field_strength**2 * 3.509e16_dp
+                print*, "--- Laser #", i, "---"
+                print*, "  Envelope shape:  ", trim(pl%envelope_shape)
+                print*, "  Wavelength:      ", sngl(pl%lambda), "nm"
+                print*, "  Quiver amplitude:", sngl(pl%alpha0), "a.u."
+                print*, "  Field strength:  ", sngl(field_strength), "a.u."
+                print*, "  Intensity:       ", sngl(intensity), "W/cm2"
+                print*, "  Pulse width (tp):", sngl(pl%tp * au2fs), "fs"
+                print*, "  Pulse midpoint:  ", sngl(pl%t_mid * au2fs), "fs"
+                print*, "  Phase (phi):     ", sngl(pl%phi / pi), "pi"
+                print*, "  Rise time:       ", sngl(pl%rise_time * au2fs), "fs"
+            end associate
+        end do
         print*, "------------------------------------------------------"
     end subroutine print_pulse_param
 
-    ! A subroutine for initializing the pulse parameters
-    subroutine initialize_pulse_param(this)
-        class(pulse_param), intent(inout) :: this
-        ! Initialize the pulse parameters
-        this%tp1 = this%tp1 / au2fs  
-        this%tp2 = this%tp2 / au2fs  
-        this%t_mid1 = this%t_mid1 / au2fs   
-        this%t_mid2 = this%t_mid2 / au2fs   
-        this%rise_time1 = this%rise_time1 / au2fs
-        this%rise_time2 = this%rise_time2 / au2fs
-        this%omega1 = (1._dp / (this%lambda1 * 1.e-7_dp)) * cm2au
-        this%omega2 = (1._dp / (this%lambda2 * 1.e-7_dp)) * cm2au
-        this%phi1 = this%phi1 * pi
-        this%phi2 = this%phi2 * pi
-    end subroutine initialize_pulse_param
-
-
-    ! A subroutine for defining the field 
+    !> Generate the complete pulse: loop over all defined pulses,
+    !> compute individual envelopes/fields, then sum into total arrays.
     subroutine generate_pulse(this)
         use differentiation, only: central_diff_on_grid
         class(pulse_param), intent(inout) :: this
-        integer :: k
-        integer :: n_cycles
+        integer :: i, k, n_cycles
         real(dp) :: ttime, TU_eff, tp_eff
 
         print*
         print*, "Pulse generation..."
-    
-        ! Initialize arrays
-        allocate(this%alpha_t(Nt))
-        allocate(this%alpha_t1(Nt), this%alpha_t2(Nt))
-        allocate(this%El(Nt), this%Al(Nt))
-        allocate(this%E21(Nt), this%E22(Nt))
-        allocate(this%A21(Nt), this%A22(Nt))
-        allocate(this%g1(Nt), this%g2(Nt))
-        this%alpha_t = 0.0_dp
-        this%El = 0.0_dp
-        this%Al = 0.0_dp
-        this%alpha_t1 = 0.0_dp; this%alpha_t2 = 0._dp
-        this%E21 = 0.0_dp; this%E22 = 0.0_dp
-        this%A21 = 0.0_dp; this%A22 = 0.0_dp
-        this%g1 = 0.0_dp; this%g2 = 0.0_dp
-        this%pulse_offset1 = 0.0_dp
-        this%pulse_offset2 = 0.0_dp
 
-        ! Calculate the envelope shapes
-        ! Envelope shape for laser 1
-        select case(trim(this%envelope_shape_laser1))
-        case("cos2")
-            do k = 1, Nt
-                this%g1(k) = cos2(time(k), this%tp1, this%t_mid1, this%pulse_offset1)
-                this%alpha_t1(k) = this%alpha01 * this%g1(k) * cos(this%omega1 * (time(k) - this%t_mid1 &
-                  & - this%pulse_offset1) + this%phi1)  
-            enddo
-            call central_diff_on_grid(this%alpha_t1, Nt, dt, this%A21)
-            call central_diff_on_grid(this%A21, Nt, dt, this%E21)
-            this%E21 = -this%E21
-        
-        case("sin2")
-            n_cycles = int(this%tp1 * this%omega1 / (2._dp * pi)) + 1
-            n_cycles = max(n_cycles, 1)
-            tp_eff = 2._dp * pi * real(n_cycles, dp) / this%omega1
-            do k = 1, Nt
-                this%g1(k) = sin2(time(k), tp_eff, this%t_mid1, this%pulse_offset1)
-                this%alpha_t1(k) = this%alpha01 * this%g1(k) * sin(this%omega1 * (time(k) - this%t_mid1 &
-                    & - this%pulse_offset1 - tp_eff/2) + this%phi1)  
-                this%A21(k) = sin2_vector_pulse(time(k), tp_eff, this%t_mid1, this%alpha01, this%omega1, &
-                    & this%phi1, this%pulse_offset1)
-                this%E21(k) = sin2_electric_pulse(time(k), tp_eff, this%t_mid1, this%alpha01, this%omega1, &
-                    & this%phi1, this%pulse_offset1)
-            enddo
-            !call central_diff_on_grid(this%alpha_t1, Nt, dt, this%A21)
-            !call central_diff_on_grid(this%A21, Nt, dt, this%E21)
-            !this%E21 = -this%E21
-        
-        case("gaussian")
-            do k = 1, Nt
-                this%g1(k) = gaussian(time(k), this%tp1, this%t_mid1)
-                this%alpha_t1(k) = this%alpha01 * this%g1(k) * cos(this%omega1 * (time(k) - this%t_mid1 &
-                    & - this%pulse_offset1) + this%phi1)  
-                this%A21(k) = gaussian_vector_pulse(time(k), this%tp1, this%t_mid1, this%alpha01, this%omega1, &
-                    & this%phi1, this%pulse_offset1)
-                this%E21(k) = gaussian_electric_pulse(time(k), this%tp1, this%t_mid1, this%alpha01, this%omega1, &
-                    & this%phi1, this%pulse_offset1)
-            enddo
-            !call central_diff_on_grid(this%alpha_t1, Nt, dt, this%A21)
-            !call central_diff_on_grid(this%A21, Nt, dt, this%E21)
-            !this%E21 = -this%E21
-        
-        case("trapezoidal")
-            n_cycles = int(this%rise_time1 * this%omega1 / (2._dp * pi)) + 1
-            n_cycles = max(n_cycles, 1)
-            TU_eff = 2._dp * pi * real(n_cycles, dp) / this%omega1
-            print*, "Laser1 trapezoidal boundary times (fs):"
-            print'(a,f10.4)', "  Pulse start: ", (this%t_mid1 - this%tp1/2 - TU_eff + this%pulse_offset1)*au2fs
-            print'(a,f10.4)', "  Rise end:    ", (this%t_mid1 - this%tp1/2 + this%pulse_offset1)*au2fs
-            print'(a,f10.4)', "  Flat end:    ", (this%t_mid1 + this%tp1/2 + this%pulse_offset1)*au2fs
-            print'(a,f10.4)', "  Pulse end:   ", (this%t_mid1 + this%tp1/2 + TU_eff + this%pulse_offset1)*au2fs
-            do k = 1, Nt
-                ttime = time(k) - this%t_mid1 - this%pulse_offset1 
-                this%g1(k) = trapezoidal(time(k), this%tp1, this%t_mid1, TU_eff, this%pulse_offset1)
-                this%alpha_t1(k) = this%alpha01 * this%g1(k) * cos(this%omega1 * ttime + this%phi1)
-                this%A21(k) = trapezoidal_vector_pulse(time(K), this%omega1, this%phi1, &
-                    & this%alpha01, this%tp1, this%t_mid1, this%pulse_offset1, TU_eff) 
-                this%E21(k) = trapezoidal_electric_pulse(time(K), this%omega1, this%phi1, &
-                    & this%alpha01, this%tp1, this%t_mid1, this%pulse_offset1, TU_eff) 
-            enddo
-        case default
-            print*, "Laser1: Default pulse shape is CW."
-        end select
-        ! Envelope shape for laser 2
-        select case(trim(this%envelope_shape_laser2))
-        case("cos2")
-            !this%tp1 = this%tp1/(1-2/pi) ! check this
-            do k = 1, Nt 
-                this%g2(k) = cos2(time(k), this%tp2, this%t_mid2, this%pulse_offset2)
-                this%alpha_t2(k) = this%alpha02 * this%g2(k) * cos(this%omega2 * (time(k) - this%t_mid2 &
-                  & - this%pulse_offset2) + this%phi2)                
-            enddo
-            call central_diff_on_grid(this%alpha_t2, Nt, dt, this%A22)
-            call central_diff_on_grid(this%A22, Nt, dt, this%E22)
-            this%E22 = -this%E22
-        
-        case("sin2")
-            n_cycles = int(this%tp2 * this%omega2 / (2._dp * pi)) + 1
-            n_cycles = max(n_cycles, 1)
-            tp_eff = 2._dp * pi * real(n_cycles, dp) / this%omega2
-            do k = 1, Nt
-                this%g2(k) = sin2(time(k), tp_eff, this%t_mid2, this%pulse_offset2)
-                this%alpha_t2(k) = this%alpha02 * this%g2(k) * sin(this%omega2 * (time(k) - this%t_mid2 &
-                  & - this%pulse_offset2 + tp_eff/2) + this%phi2)
-                this%A22(k) = sin2_vector_pulse(time(k), tp_eff, this%t_mid2, this%alpha02, this%omega2, &
-                    & this%phi2, this%pulse_offset2)
-                this%E22(k) = sin2_electric_pulse(time(k), tp_eff, this%t_mid2, this%alpha02, this%omega2, &
-                    & this%phi2, this%pulse_offset2)  
-            enddo
-            !call central_diff_on_grid(this%alpha_t2, Nt, dt, this%A22)
-            !call central_diff_on_grid(this%A22, Nt, dt, this%E22)
-            !this%E22 = -this%E22
-        
-        case("gaussian")
-            do k = 1, Nt
-                this%g2(k) = gaussian(time(k), this%tp2, this%t_mid2)
-                this%alpha_t2(k) = this%alpha02 * this%g2(k) * cos(this%omega2 * (time(k) - this%t_mid2 &
-                  & - this%pulse_offset2) + this%phi2)
-                this%A22(k) = gaussian_vector_pulse(time(k), this%tp2, this%t_mid2, this%alpha02, this%omega2, &
-                    & this%phi2, this%pulse_offset2)
-                this%E22(k) = gaussian_electric_pulse(time(k), this%tp2, this%t_mid2, this%alpha02, this%omega2, &
-                    & this%phi2, this%pulse_offset2)
-            enddo
-            !call central_diff_on_grid(this%alpha_t2, Nt, dt, this%A22)
-            !call central_diff_on_grid(this%A22, Nt, dt, this%E22)
-            !this%E22 = -this%E22
-        
-        case("trapezoidal")
-            n_cycles = int(this%rise_time2 * this%omega2 / (2._dp * pi)) + 1
-            n_cycles = max(n_cycles, 1)
-            TU_eff = 2._dp * pi * real(n_cycles, dp) / this%omega2
-            print*, "Laser2 trapezoidal boundary times (fs):"
-            print'(a,f10.4)', "  Pulse start: ", (this%t_mid2 - this%tp2/2 - TU_eff + this%pulse_offset2)*au2fs
-            print'(a,f10.4)', "  Rise end:    ", (this%t_mid2 - this%tp2/2 + this%pulse_offset2)*au2fs
-            print'(a,f10.4)', "  Flat end:    ", (this%t_mid2 + this%tp2/2 + this%pulse_offset2)*au2fs
-            print'(a,f10.4)', "  Pulse end:   ", (this%t_mid2 + this%tp2/2 + TU_eff + this%pulse_offset2)*au2fs
-            do k = 1, Nt
-                this%g2(k) = trapezoidal(time(k), this%tp2, this%t_mid2, TU_eff, this%pulse_offset2)
-                this%alpha_t2(k) = this%alpha02 * this%g2(k) * cos(this%omega2 * (time(k) - this%t_mid2 &
-                  & - this%pulse_offset2) + this%phi2)                
-                this%A22(k) = trapezoidal_vector_pulse(time(K), this%omega2, this%phi2, &
-                    & this%alpha02, this%tp2, this%t_mid2, this%pulse_offset2, TU_eff)
-                this%E22(k) = trapezoidal_electric_pulse(time(K), this%omega2, this%phi2, &
-                    & this%alpha02, this%tp2, this%t_mid2, this%pulse_offset2, TU_eff)
-            enddo
-        case default
-            print*, "Laser2: Default pulse shape is CW."
-        end select
+        ! Allocate per-pulse arrays
+        do i = 1, this%N_pulses
+            associate(pl => this%pulses(i))
+                allocate(pl%alpha_t(Nt), pl%E_field(Nt), pl%A_field(Nt), pl%env(Nt))
+                pl%alpha_t  = 0._dp
+                pl%E_field  = 0._dp
+                pl%A_field  = 0._dp
+                pl%env      = 0._dp
+            end associate
+        end do
 
-        ! Generate the Quiver-field
-        this%alpha_t = this%alpha_t1 + this%alpha_t2
-        
-        ! Generate Vector field A = d(alpha_t) / dt
-        this%Al = this%A21 + this%A22
-        
-        !Generate Electric field E = - dA / dt
-        this%El = this%E21 + this%E22
+        ! Allocate total-field arrays
+        allocate(this%alpha_t(Nt), this%El(Nt), this%Al(Nt))
+        this%alpha_t = 0._dp
+        this%El      = 0._dp
+        this%Al      = 0._dp
+
+        ! Generate each pulse
+        do i = 1, this%N_pulses
+            call generate_single(this%pulses(i), i)
+        end do
+
+        ! Sum contributions into total fields
+        do i = 1, this%N_pulses
+            associate(pl => this%pulses(i))
+                this%alpha_t = this%alpha_t + pl%alpha_t
+                this%Al      = this%Al      + pl%A_field
+                this%El      = this%El      + pl%E_field
+            end associate
+        end do
 
         print*, "Pulse generation complete."
         call this%write_to_file()
     end subroutine generate_pulse
 
-    ! A subroutine to calculate the field spectra using FFTW
+    !> Generate a single pulse (internal helper).
+    subroutine generate_single(pl, idx)
+        use differentiation, only: central_diff_on_grid
+        type(single_pulse_data), intent(inout) :: pl
+        integer, intent(in) :: idx
+        integer :: k, n_cycles
+        real(dp) :: ttime, TU_eff, tp_eff
+        character(20) :: label
+
+        write(label, '(A,I0)') 'Laser', idx
+
+        select case(trim(pl%envelope_shape))
+        case("cos2")
+            do k = 1, Nt
+                pl%env(k)    = cos2(time(k), pl%tp, pl%t_mid, pl%pulse_offset)
+                pl%alpha_t(k) = pl%alpha0 * pl%env(k) &
+                    & * cos(pl%omega * (time(k) - pl%t_mid - pl%pulse_offset) + pl%phi)
+            end do
+            call central_diff_on_grid(pl%alpha_t, Nt, dt, pl%A_field)
+            call central_diff_on_grid(pl%A_field, Nt, dt, pl%E_field)
+            pl%E_field = -pl%E_field
+
+        case("sin2")
+            n_cycles = int(pl%tp * pl%omega / (2._dp * pi)) + 1
+            n_cycles = max(n_cycles, 1)
+            tp_eff = 2._dp * pi * real(n_cycles, dp) / pl%omega
+            do k = 1, Nt
+                pl%env(k)    = sin2(time(k), tp_eff, pl%t_mid, pl%pulse_offset)
+                pl%alpha_t(k) = pl%alpha0 * pl%env(k) &
+                    & * sin(pl%omega * (time(k) - pl%t_mid - pl%pulse_offset - tp_eff/2) + pl%phi)
+                pl%A_field(k) = sin2_vector_pulse(time(k), tp_eff, pl%t_mid, pl%alpha0, &
+                    & pl%omega, pl%phi, pl%pulse_offset)
+                pl%E_field(k) = sin2_electric_pulse(time(k), tp_eff, pl%t_mid, pl%alpha0, &
+                    & pl%omega, pl%phi, pl%pulse_offset)
+            end do
+
+        case("gaussian")
+            do k = 1, Nt
+                pl%env(k)    = gaussian(time(k), pl%tp, pl%t_mid)
+                pl%alpha_t(k) = pl%alpha0 * pl%env(k) &
+                    & * cos(pl%omega * (time(k) - pl%t_mid - pl%pulse_offset) + pl%phi)
+                pl%A_field(k) = gaussian_vector_pulse(time(k), pl%tp, pl%t_mid, pl%alpha0, &
+                    & pl%omega, pl%phi, pl%pulse_offset)
+                pl%E_field(k) = gaussian_electric_pulse(time(k), pl%tp, pl%t_mid, pl%alpha0, &
+                    & pl%omega, pl%phi, pl%pulse_offset)
+            end do
+
+        case("trapezoidal")
+            n_cycles = int(pl%rise_time * pl%omega / (2._dp * pi)) + 1
+            n_cycles = max(n_cycles, 1)
+            TU_eff = 2._dp * pi * real(n_cycles, dp) / pl%omega
+            print*, trim(label) // " trapezoidal boundary times (fs):"
+            print'(a,f10.4)', "  Pulse start: ", (pl%t_mid - pl%tp/2 - TU_eff + pl%pulse_offset)*au2fs
+            print'(a,f10.4)', "  Rise end:    ", (pl%t_mid - pl%tp/2 + pl%pulse_offset)*au2fs
+            print'(a,f10.4)', "  Flat end:    ", (pl%t_mid + pl%tp/2 + pl%pulse_offset)*au2fs
+            print'(a,f10.4)', "  Pulse end:   ", (pl%t_mid + pl%tp/2 + TU_eff + pl%pulse_offset)*au2fs
+            do k = 1, Nt
+                ttime = time(k) - pl%t_mid - pl%pulse_offset
+                pl%env(k)    = trapezoidal(time(k), pl%tp, pl%t_mid, TU_eff, pl%pulse_offset)
+                pl%alpha_t(k) = pl%alpha0 * pl%env(k) * cos(pl%omega * ttime + pl%phi)
+                pl%A_field(k) = trapezoidal_vector_pulse(time(k), pl%omega, pl%phi, &
+                    & pl%alpha0, pl%tp, pl%t_mid, pl%pulse_offset, TU_eff)
+                pl%E_field(k) = trapezoidal_electric_pulse(time(k), pl%omega, pl%phi, &
+                    & pl%alpha0, pl%tp, pl%t_mid, pl%pulse_offset, TU_eff)
+            end do
+        case default
+            print*, trim(label) // ": Default pulse shape is CW."
+        end select
+    end subroutine generate_single
+
+    !> Calculate field spectra using FFTW.
     subroutine field_spectra(this)
         use global_vars, only: prop_par_FFTW, pulse_data_dir
         class(pulse_param), intent(inout) :: this
@@ -311,18 +235,16 @@ contains
         character(150) :: filename
         type(C_PTR) :: planTF, planTB, p_in, p_out
         complex(C_DOUBLE_COMPLEX), pointer:: E_dum_in(:), E_dum_out(:)
-        ! file tokens
         integer:: field_spec_tk
 
-        ! Creating aligned memory for FFTW
-        p_in = fftw_alloc_complex(int(Nt, C_SiZE_T)) 
+        p_in = fftw_alloc_complex(int(Nt, C_SiZE_T))
         call c_f_pointer(p_in,E_dum_in,[Nt])
-        p_out = fftw_alloc_complex(int(Nt, C_SiZE_T)) 
+        p_out = fftw_alloc_complex(int(Nt, C_SiZE_T))
         call c_f_pointer(p_out,E_dum_out,[Nt])
 
         call fftw_initialize_threads
         print*, "FFTW plan creation for pulse spectra ..."
-        call fftw_create_c2c_plans(E_dum_in, E_dum_out, Nt, & 
+        call fftw_create_c2c_plans(E_dum_in, E_dum_out, Nt, &
             & planTF, planTB, prop_par_FFTW)
         print*, "Done setting up FFTW."
 
@@ -332,15 +254,14 @@ contains
 
         write(filename,fmt='(a,a)') adjustl(trim(pulse_data_dir)), 'field_spectra.out'
         open(newunit=field_spec_tk, file=filename,status="unknown")
-        ! write the field spectra to file
         do k = Nt/2+1, Nt
-            write(field_spec_tk,*) -(Nt + 1 - k) * 2 *pi/(dt * Nt), & 
+            write(field_spec_tk,*) -(Nt + 1 - k) * 2 *pi/(dt * Nt), &
                 & real(E_dum_in(k)), imag(E_dum_in(k)), abs(E_dum_in(k))
-        enddo
+        end do
         do k = 1, Nt/2
-            write(field_spec_tk,*) (k-1)*2*pi/(dt*Nt), real(E_dum_in(k)), & 
+            write(field_spec_tk,*) (k-1)*2*pi/(dt*Nt), real(E_dum_in(k)), &
                 & imag(E_dum_in(k)), abs(E_dum_in(k))
-        enddo
+        end do
         close(field_spec_tk)
 
         call fftw_destroy_plan(planTF)
@@ -349,113 +270,115 @@ contains
         call fftw_free(p_out)
     end subroutine field_spectra
 
-    ! A subroutine for writing the pulse to files
+    !> Write individual pulse data and total fields to files.
     subroutine write_pulse_to_file(this)
         use global_vars, only: pulse_data_dir
         class(pulse_param), intent(in) :: this
-        integer :: k
+        integer :: i, k, unit_tk, tk_ef, tk_vf, tk_kf
         real(dp) :: A_check(Nt), alpha_t_check(Nt)
         character(150) :: filename
- 
-        ! file tokens
-        integer:: envelope1_tk, envelope2_tk
-        integer:: field1_tk, field2_tk
-        integer:: elec_field_tk, vec_field_tk, kh_field_tk
-    
-        write(filename,fmt='(a,a)') adjustl(trim(pulse_data_dir)), 'envelope1.out'
-        open(newunit=envelope1_tk, file=filename,status="unknown")
-        write(filename,fmt='(a,a)') adjustl(trim(pulse_data_dir)), 'envelope2.out'
-        open(newunit=envelope2_tk, file=filename,status="unknown")
-        write(filename,fmt='(a,a,f4.2,a,i0,a)') adjustl(trim(pulse_data_dir)), &
-            & 'electric_field1_alpha', this%alpha01,'_width',Int(this%tp1*au2fs),'.out'
-        open(newunit=field1_tk, file=filename,status="unknown")
-        write(filename,fmt='(a,a,f6.4,a,i0,a)') adjustl(trim(pulse_data_dir)), &
-            & 'electric_field2_alpha', this%alpha02,'_width',Int(this%tp2*au2fs),'.out'
-        open(newunit=field2_tk, file=filename,status="unknown")
-        write(filename,fmt='(a,a,f4.2,a)') adjustl(trim(pulse_data_dir)), &
-            & 'Total_electric_field_phi', this%phi2/pi,'pi.out'
-        open(newunit=elec_field_tk, file=filename,status="unknown")
-        write(filename,fmt='(a,a,f4.2,a)') adjustl(trim(pulse_data_dir)), &
-            & 'Total_vector_field_phi', this%phi2/pi, 'pi.out'
-        open(newunit=vec_field_tk, file=filename,status="unknown")
-        write(filename,fmt='(a,a,f4.2,a)') adjustl(trim(pulse_data_dir)), &
-            & 'Total_KH_field_phi', this%phi2/pi, 'pi.out'
-        open(newunit=kh_field_tk, file=filename,status="unknown")
+        character(8)   :: idx_str
 
-        timeloop: do k = 1, Nt
-            ! Check elctric field correctness by reverse generating the vector potential
-            A_check(k) = -sum(this%El(1:k))*dt
-            alpha_t_check(k) = sum(this%Al(1:k))*dt
-            write(field1_tk,*) time(k)*au2fs, this%E21(k), this%A21(k), this%alpha_t1(k)
-            write(field2_tk,*) time(k)*au2fs, this%E22(k), this%A22(k), this%alpha_t2(k)
-            write(envelope1_tk,*) time(k)*au2fs, this%g1(k)
-            write(envelope2_tk,*) time(k)*au2fs, this%g2(k)
-            write(elec_field_tk,*) time(k)*au2fs, this%El(k)
-            write(vec_field_tk,*) time(k)*au2fs, this%Al(k), A_check(k)
-            write(kh_field_tk,*) time(k)*au2fs, this%alpha_t(k), alpha_t_check(k)
-        enddo timeloop
+        ! Per-pulse files
+        do i = 1, this%N_pulses
+            write(idx_str, '(I0)') i
+            associate(pl => this%pulses(i))
+                write(filename,fmt='(a,a,a,a)') adjustl(trim(pulse_data_dir)), &
+                    & 'envelope', trim(idx_str), '.out'
+                open(newunit=unit_tk, file=filename,status="unknown")
+                do k = 1, Nt
+                    write(unit_tk,*) time(k)*au2fs, pl%env(k)
+                end do
+                close(unit_tk)
+
+                write(filename,fmt='(a,a,a,a)') adjustl(trim(pulse_data_dir)), &
+                    & 'field', trim(idx_str), '.out'
+                open(newunit=unit_tk, file=filename,status="unknown")
+                do k = 1, Nt
+                    write(unit_tk,*) time(k)*au2fs, pl%E_field(k), pl%A_field(k), pl%alpha_t(k)
+                end do
+                close(unit_tk)
+            end associate
+        end do
+
+        ! Total-field files
+        write(filename,fmt='(a,a)') adjustl(trim(pulse_data_dir)), &
+            & 'Total_electric_field.out'
+        open(newunit=tk_ef, file=filename,status="unknown")
+        write(filename,fmt='(a,a)') adjustl(trim(pulse_data_dir)), &
+            & 'Total_vector_field.out'
+        open(newunit=tk_vf, file=filename,status="unknown")
+        write(filename,fmt='(a,a)') adjustl(trim(pulse_data_dir)), &
+            & 'Total_KH_field.out'
+        open(newunit=tk_kf, file=filename,status="unknown")
+
+        do k = 1, Nt
+            A_check(k)      = -sum(this%El(1:k))*dt
+            alpha_t_check(k) =  sum(this%Al(1:k))*dt
+            write(tk_ef, *) time(k)*au2fs, this%El(k)
+            write(tk_vf, *) time(k)*au2fs, this%Al(k), A_check(k)
+            write(tk_kf, *) time(k)*au2fs, this%alpha_t(k), alpha_t_check(k)
+        end do
+        close(tk_ef)
+        close(tk_vf)
+        close(tk_kf)
 
         print*, "Done writing field information in the files."
-        close(envelope1_tk)
-        close(envelope2_tk)
-        close(field1_tk)
-        close(field2_tk)
-        close(elec_field_tk)
-        close(vec_field_tk)
-        close(kh_field_tk)
-
     end subroutine write_pulse_to_file
-  
-    ! pulse envelope functions %%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
+
+    ! ==================================================================
+    !  Envelope functions (unchanged)
+    ! ==================================================================
     function cos2(t, tp, t_mid, pulse_offset)
         real(dp), intent(in) :: t, tp, t_mid, pulse_offset
         real(dp) :: cos2
-        if (t .gt. (t_mid+pulse_offset-tp/2) .and. t .lt. (t_mid+pulse_offset+tp/2)) then
-            cos2 = cos((t - t_mid-pulse_offset)*pi/tp)**2      
+        if (t > (t_mid+pulse_offset-tp/2) .and. t < (t_mid+pulse_offset+tp/2)) then
+            cos2 = cos((t - t_mid - pulse_offset)*pi/tp)**2
         else
             cos2 = 0._dp
-        endif
+        end if
     end function cos2
 
     function sin2(t, tp, t_mid, pulse_offset)
         real(dp), intent(in) :: t, tp, t_mid, pulse_offset
         real(dp) :: sin2
-        if (t .gt. (t_mid+pulse_offset-tp/2) .and. t .lt. (t_mid+pulse_offset+tp/2)) then
-            sin2 = sin((t - t_mid-pulse_offset+tp/2)*pi/tp)**2      
+        if (t > (t_mid+pulse_offset-tp/2) .and. t < (t_mid+pulse_offset+tp/2)) then
+            sin2 = sin((t - t_mid - pulse_offset + tp/2)*pi/tp)**2
         else
             sin2 = 0._dp
-        endif
+        end if
     end function sin2
 
     function trapezoidal(t, tp, t_mid, rise_time, pulse_offset)
         real(dp), intent(in) :: t, tp, t_mid, rise_time, pulse_offset
         real(dp) :: trapezoidal, slope, yc, teff
         teff = t - pulse_offset
-        if (teff .ge. t_mid - (tp/2 + rise_time) .and. teff .le. t_mid - tp/2) then
+        if (teff >= t_mid - (tp/2 + rise_time) .and. teff <= t_mid - tp/2) then
             slope = 1._dp/rise_time
             yc = (t_mid - (tp/2 + rise_time)) * slope
             trapezoidal = slope * teff - yc
-        elseif (teff .gt. t_mid - tp/2 .and. teff .le. t_mid + tp/2) then
+        elseif (teff > t_mid - tp/2 .and. teff <= t_mid + tp/2) then
             trapezoidal = 1._dp
-        elseif (teff .gt. t_mid + tp/2 .and. teff .le. t_mid + (tp/2 + rise_time)) then 
+        elseif (teff > t_mid + tp/2 .and. teff <= t_mid + (tp/2 + rise_time)) then
             slope = -1._dp/rise_time
             yc = (t_mid + tp/2 + rise_time) * slope
             trapezoidal = slope * teff - yc
         else
             trapezoidal = 0._dp
-        endif
+        end if
     end function trapezoidal
- 
+
     function gaussian(t, tp, t_mid)
         implicit none
         real(dp):: t, tp, t_mid
         real(dp):: gaussian, fwhm
- 
         fwhm = (4._dp * log(2._dp)) / tp**2
         gaussian = exp(-fwhm * (t - t_mid)**2)
     end function gaussian
 
-    ! Analytic vector and electric fields %%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
+    ! ==================================================================
+    !  Analytic vector and electric fields (unchanged signatures)
+    ! ==================================================================
     function gaussian_vector_pulse(t, tp, t_mid, alpha0, omega, phase, pulse_offset)
         implicit none
         real(dp), intent(in) :: t, tp, t_mid, alpha0, omega, phase, pulse_offset
@@ -485,17 +408,16 @@ contains
         real(dp), intent(in) :: t, tp, t_mid, alpha0, omega, phase, pulse_offset
         real(dp) :: sin2_env, theta, t_local, inv_tp
         real(dp) :: sin2_vector_pulse
-        if (t .gt. (t_mid+pulse_offset-tp/2) .and. t .lt. (t_mid+pulse_offset+tp/2)) then
+        if (t > (t_mid+pulse_offset-tp/2) .and. t < (t_mid+pulse_offset+tp/2)) then
             t_local = t - t_mid - pulse_offset + tp/2
             inv_tp = 1._dp/tp
             theta = omega * t_local + phase
             sin2_env = sin(pi * t_local * inv_tp)**2
-
             sin2_vector_pulse = alpha0 * ( pi* inv_tp * sin(2._dp * pi * t_local * inv_tp) * sin(theta) &
                 & + omega * sin2_env * cos(theta))
         else
             sin2_vector_pulse = 0._dp
-        endif
+        end if
     end function sin2_vector_pulse
 
     function sin2_electric_pulse(t, tp, t_mid, alpha0, omega, phase, pulse_offset)
@@ -503,148 +425,106 @@ contains
         real(dp), intent(in) :: t, tp, t_mid, alpha0, omega, phase, pulse_offset
         real(dp) :: sin2_env, theta, t_local, inv_tp
         real(dp) :: sin2_electric_pulse
-        if (t .gt. (t_mid+pulse_offset-tp/2) .and. t .lt. (t_mid+pulse_offset+tp/2)) then
+        if (t > (t_mid+pulse_offset-tp/2) .and. t < (t_mid+pulse_offset+tp/2)) then
             t_local = t - t_mid - pulse_offset + tp/2
             inv_tp = 1._dp/tp
             theta = omega * t_local + phase
             sin2_env = sin(pi * t_local * inv_tp)**2
-
-            sin2_electric_pulse = -alpha0 * ( 2._dp * pi*pi * inv_tp*inv_tp * cos(2._dp * pi * t_local * inv_tp) & 
+            sin2_electric_pulse = -alpha0 * ( 2._dp * pi*pi * inv_tp*inv_tp * cos(2._dp * pi * t_local * inv_tp) &
                 & * sin(theta) + 2._dp * omega * pi * inv_tp * sin(2._dp * pi * t_local * inv_tp) * cos(theta) &
                 & - omega * omega * sin2_env * sin(theta))
         else
             sin2_electric_pulse = 0._dp
-        endif
+        end if
     end function sin2_electric_pulse
 
-    !> Analytic vector potential A(t) = d(alpha_t)/dt with boundary-matched
-    !> integration constants so that A(t=0)=0 and A(t=TF)=0.
-    !> The caller must pass an integer-cycle-adjusted rise_time (TU) for
-    !> internal boundary matching between Case II and Case III.
     function trapezoidal_vector_pulse(t, omega, phase, alpha0, tp, t_mid, pulse_offset, rise_time)
         real(dp), intent(in) :: t, omega, phase, alpha0, tp, t_mid, pulse_offset, rise_time
         real(dp) :: trapezoidal_vector_pulse
         real(dp) :: t_start, t_local, theta, phi0
         real(dp) :: TU, TF
-
         TU = rise_time
         TF = tp + 2._dp * TU
         t_start = t_mid - tp/2._dp - TU + pulse_offset
         t_local = t - t_start
-
-        ! Initial phase at pulse start
         phi0 = -omega * (tp/2._dp + TU) + phase
         theta = omega * t_local + phi0
-
-        if (t_local .ge. 0._dp .and. t_local .le. TU) then
-            ! Case I: Rise
+        if (t_local >= 0._dp .and. t_local <= TU) then
             trapezoidal_vector_pulse = -alpha0 / TU &
                 & * ( omega * t_local * sin(theta) - cos(theta) + cos(phi0) )
-        elseif (t_local .gt. TU .and. t_local .le. TU + tp) then
-            ! Case II: Flat top
+        elseif (t_local > TU .and. t_local <= TU + tp) then
             trapezoidal_vector_pulse = -alpha0 * omega &
                 & * ( sin(theta) + (cos(phi0) - cos(omega * TU + phi0)) / (omega * TU) )
-        elseif (t_local .gt. TU + tp .and. t_local .le. TF) then
-            ! Case III: Fall
+        elseif (t_local > TU + tp .and. t_local <= TF) then
             trapezoidal_vector_pulse = -alpha0 / TU &
                 & * ( (TF - t_local) * omega * sin(theta) + cos(theta) - cos(omega * TF + phi0) )
         else
             trapezoidal_vector_pulse = 0._dp
-        endif
+        end if
     end function trapezoidal_vector_pulse
 
-    !> Analytic electric field E(t) = -dA/dt with boundary-matched
-    !> integration constants so that E(t=0)=0 and E(t=TF)=0.
-    !> The caller must pass an integer-cycle-adjusted rise_time (TU) for
-    !> internal boundary matching between Case II and Case III.
     function trapezoidal_electric_pulse(t, omega, phase, alpha0, tp, t_mid, pulse_offset, rise_time)
         real(dp), intent(in) :: t, omega, phase, alpha0, tp, t_mid, pulse_offset, rise_time
         real(dp) :: trapezoidal_electric_pulse
         real(dp) :: t_start, t_local, theta, phi0
         real(dp) :: TU, TF
-
         TU = rise_time
         TF = tp + 2._dp * TU
         t_start = t_mid - tp/2._dp - TU + pulse_offset
         t_local = t - t_start
-
-        ! Initial phase at pulse start
         phi0 = -omega * (tp/2._dp + TU) + phase
         theta = omega * t_local + phi0
-
-        if (t_local .ge. 0._dp .and. t_local .le. TU) then
-            ! Case I: Rise
+        if (t_local >= 0._dp .and. t_local <= TU) then
             trapezoidal_electric_pulse = alpha0 / TU &
                 & * ( omega**2 * t_local * cos(theta) + 2._dp * omega * sin(theta) - 2._dp * omega * sin(phi0) )
-        elseif (t_local .gt. TU .and. t_local .le. TU + tp) then
-            ! Case II: Flat top
+        elseif (t_local > TU .and. t_local <= TU + tp) then
             trapezoidal_electric_pulse = alpha0 * omega**2 &
                 & * ( cos(theta) + 2._dp * (sin(omega * TU + phi0) - sin(phi0)) / (omega * TU) )
-        elseif (t_local .gt. TU + tp .and. t_local .le. TF) then
-            ! Case III: Fall
+        elseif (t_local > TU + tp .and. t_local <= TF) then
             trapezoidal_electric_pulse = alpha0 / TU &
                 & * ( omega**2 * (TF - t_local) * cos(theta) - 2._dp * omega * sin(theta) &
                 &     + 2._dp * omega * sin(omega * TF + phi0) )
         else
             trapezoidal_electric_pulse = 0._dp
-        endif
+        end if
     end function trapezoidal_electric_pulse
 
-    !%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
-    ! A subroutine for deallocating the envelope arrays
+    ! ==================================================================
+    !  Deallocation routines
+    ! ==================================================================
     subroutine deallocate_envelope(this)
         class(pulse_param), intent(inout) :: this
-        if (allocated(this%g1)) then
-            deallocate(this%g1)
-        end if
-        if (allocated(this%g2)) then
-            deallocate(this%g2)
+        integer :: i
+        if (allocated(this%pulses)) then
+            do i = 1, size(this%pulses)
+                if (allocated(this%pulses(i)%env)) deallocate(this%pulses(i)%env)
+            end do
         end if
     end subroutine deallocate_envelope
-    ! A subroutine for deallocating the field arrays
+
     subroutine deallocate_field(this)
         class(pulse_param), intent(inout) :: this
-        if (allocated(this%E21)) then
-            deallocate(this%E21)
-        end if
-        if (allocated(this%E22)) then
-            deallocate(this%E22)
-        end if
-        if (allocated(this%A21)) then
-            deallocate(this%A21)
-        end if
-        if (allocated(this%A22)) then
-            deallocate(this%A22)
-        end if
-        if (allocated(this%alpha_t1)) then
-            deallocate(this%alpha_t1)
-        end if
-        if (allocated(this%alpha_t2)) then
-            deallocate(this%alpha_t2)
+        integer :: i
+        if (allocated(this%pulses)) then
+            do i = 1, size(this%pulses)
+                if (allocated(this%pulses(i)%E_field))  deallocate(this%pulses(i)%E_field)
+                if (allocated(this%pulses(i)%A_field))  deallocate(this%pulses(i)%A_field)
+                if (allocated(this%pulses(i)%alpha_t))  deallocate(this%pulses(i)%alpha_t)
+            end do
         end if
     end subroutine deallocate_field
-    ! A subroutine for deallocating all arrays
-    subroutine deallocate_all(this)
-    !    type(pulse_param) :: this
-        class(pulse_param), intent(inout) :: this
 
+    subroutine deallocate_all(this)
+        class(pulse_param), intent(inout) :: this
         print*
         print*, "Cleaning up pulse variables ..."
         call deallocate_envelope(this)
         call deallocate_field(this)
-        if (allocated(this%El)) then
-            deallocate(this%El)
-        end if
-        if (allocated(this%Al)) then
-            deallocate(this%Al)
-        end if
-        if (allocated(this%alpha_t)) then
-            deallocate(this%alpha_t)
-        end if
+        if (allocated(this%El))      deallocate(this%El)
+        if (allocated(this%Al))      deallocate(this%Al)
+        if (allocated(this%alpha_t)) deallocate(this%alpha_t)
+        if (allocated(this%pulses))  deallocate(this%pulses)
         print*,"Done"
     end subroutine deallocate_all
-  !------------------------------------------------------------------------------
 
 end module pulse_mod
- 
-

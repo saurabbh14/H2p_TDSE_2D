@@ -1,4 +1,5 @@
 builddir/
+build-release/
 output_data/
 *.out
 .vscode

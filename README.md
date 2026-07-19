@@ -25,8 +25,8 @@ A Fortran-based code for solving the time-dependent Schrödinger equation (TDSE)
 - **4th-order Runge-Kutta (RK4)** — Higher-order explicit integrator
 
 ### Laser Pulse Models
-- **Envelope shapes**: cos², Gaussian, and trapezoidal (with configurable rise time)
-- **Two-color fields**: Two independent laser pulses with separate wavelengths, intensities, durations, and phases
+- **Envelope shapes**: cos², Gaussian, trapezoidal (with configurable rise time), and CW (continuous wave)
+- **Arbitrary number of laser pulses**: Define one, two, or many `[[laser.pulses]]` blocks
 - **Carrier-envelope phase** control (in units of π)
 
 ### Calculation Modes
@@ -64,42 +64,44 @@ A Fortran-based code for solving the time-dependent Schrödinger equation (TDSE)
 
 ```
 .
-├── input.ini                  # Sample input file with all simulation parameters
-├── meson.build                # Top-level Meson build configuration
-├── input_data/                # Input potential curves and data files
-│   ├── H2+_BO.dat             # Born-Oppenheimer potential curves
-│   ├── 12.dat, 13.dat, ...    # Transition dipole moments between states
-│   └── Z_interpolated_...     # Soft-core parameter files
+├── input.toml                  # Sample TOML input file with all simulation parameters
+├── input.ini                   # Legacy namelist input (for reference; no longer used)
+├── meson.build                 # Top-level Meson build configuration
+├── input_data/                 # Input potential curves and data files
+│   ├── H2+_BO.dat              # Born-Oppenheimer potential curves
+│   ├── 12.dat, 13.dat, ...     # Transition dipole moments between states
+│   └── Z_interpolated_...      # Soft-core parameter files
 └── src/
-    ├── main.f90               # Program entry point
-    ├── propagation.f90        # 1D propagation module
-    ├── propagation_2d.f90     # 2D propagation module
-    ├── adiabatic.f90          # Adiabatic surface calculation (ITP)
-    ├── nuclear_wv.f90         # Vibrational eigenstate calculation (ITP)
-    ├── IO_modules/            # Input/Output and utility modules
-    │   ├── input_vars.f90     # Input variable definitions
-    │   ├── readinputmodule.f90# Input file parser
-    │   ├── global_vars.f90    # Shared simulation variables and arrays
-    │   ├── data_au.f90        # Atomic units and conversion constants
-    │   ├── commandlinemodule.f90 # Command-line argument parsing
-    │   ├── pot_param.f90      # Potential parameters
-    │   ├── output_dir.f03     # Output directory management
-    │   ├── printinput.f90     # Input parameter printing
-    │   └── varprecision.f90   # Precision definitions
-    ├── processes/             # Core physics modules
-    │   ├── split_operator.f03     # 1D split-operator propagator
-    │   ├── split_operator_2d.f03  # 2D split-operator propagator
-    │   ├── rk4_operator.f03       # 1D RK4 propagator
-    │   ├── rk4_operator_2d.f03    # 2D RK4 propagator
-    │   ├── pulse_gen.f90          # Laser pulse generation
-    │   ├── setpot.f90             # Potential builder (including KH)
-    │   ├── initializer.f90        # Grid and array setup
-    │   └── continuum_1d.f03       # Continuum/dissociation analysis
-    └── libs/                  # External library interfaces
-        ├── fftw3.f90          # FFTW3 Fortran interface
-        ├── blas_interface.f03 # BLAS/LAPACK interface
-        ├── differentiation.f03# Numerical differentiation
-        └── timeit.f90         # Timing utility
+    ├── main.f08                # Program entry point
+    ├── propagation.f08         # 1D propagation module
+    ├── propagation_2d.f08      # 2D propagation module
+    ├── adiabatic.f08           # Adiabatic surface calculation (ITP)
+    ├── nuclear_wv.f08          # Vibrational eigenstate calculation (ITP)
+    ├── IO_modules/             # Input/Output and utility modules
+    │   ├── input_vars.f08      # Input variable definitions
+    │   ├── readinputmodule.f08 # TOML input file parser
+    │   ├── toml_parser.f08     # TOML subset parser (section, array-of-tables)
+    │   ├── global_vars.f08     # Shared simulation variables and arrays
+    │   ├── data_au.f08         # Atomic units and conversion constants
+    │   ├── commandlinemodule.f08 # Command-line argument parsing
+    │   ├── pot_param.f08       # Potential parameters
+    │   ├── output_dir.f08      # Output directory management
+    │   ├── printinput.f08      # Input parameter printing
+    │   └── varprecision.f08    # Precision definitions
+    ├── processes/              # Core physics modules
+    │   ├── split_operator.f08      # 1D split-operator propagator
+    │   ├── split_operator_2d.f08   # 2D split-operator propagator
+    │   ├── rk4_operator.f08        # 1D RK4 propagator
+    │   ├── rk4_operator_2d.f08     # 2D RK4 propagator
+    │   ├── pulse_gen.f08           # Laser pulse generation (N-laser support)
+    │   ├── setpot.f08              # Potential builder (including KH)
+    │   ├── initializer.f08         # Grid and array setup
+    │   └── continuum_1d.f08        # Continuum/dissociation analysis
+    └── libs/                   # External library interfaces
+        ├── fftw3.f08           # FFTW3 Fortran interface
+        ├── blas_interface.f08  # BLAS/LAPACK interface
+        ├── differentiation.f08 # Numerical differentiation
+        └── timeit.f08          # Timing utility
 ```
 
 ---
@@ -150,7 +152,7 @@ meson setup builddir
 meson compile -C builddir
 ```
 
-The compiled executable will be located at `builddir/TDSE-2D` (or `builddir/src/TDSE-2D` depending on the Meson layout).
+The compiled executable will be located at `builddir/src/TDSE-2D`.
 
 ### 4. Build Options
 
@@ -164,50 +166,106 @@ meson compile -C builddir_debug
 
 ## Usage
 
-Run the simulation by passing an input file to the executable:
+Run the simulation by passing a TOML input file to the executable:
 
 ```bash
-./builddir/TDSE-2D input.ini
+./builddir/src/TDSE-2D input.toml
 ```
 
-All simulation parameters are specified in the input file via Fortran namelists. A sample `input.ini` is provided in the repository root.
+All simulation parameters are specified in a [TOML](https://toml.io/) input file. A sample `input.toml` is provided in the repository root. The legacy `input.ini` (Fortran namelist format) is kept for reference but is no longer used.
 
-### Key Input Parameters
+### Input File Format (`input.toml`)
 
-#### Grid Definitions
-- **`&R_grid`** — `NR`, `Rmin`, `Rmax`: Number of points and bounds for the nuclear (R) grid (in Å)
-- **`&x_grid`** — `Nx`, `xmin`, `xmax`: Number of points and bounds for the electronic (x) grid (in Å)
-- **`&time_grid`** — `dt`, `Nt`: Time step (a.u.) and total number of time steps
+The input file is organized into **scalar sections** (`[section]`) and **array-of-tables laser blocks** (`[[laser.pulses]]`). Values can be integers, floats, or quoted strings. Comments use `#`.
 
-#### Physical Parameters
-- **`&nucl_masses`** — `m1`, `m2`: Masses of the two nuclei (in units of proton mass)
-- **`&elec_states`** — `Nstates`: Number of electronic states; `sc_kind`: Potential type (`"on_grid"` or `"static"`)
-- **`&softcore_params`** — `sc_params`: Soft-core parameter file; `CalcMode`: `"Lab"`, `"KH"`, or `"KH_td"`
-- **`&vib_states`** — `guess_vstates`: Number of vibrational states to compute
+#### `[grid]` — Spatial Grid
 
-#### Initial Conditions
-- **`&ini_guess_wf`** — `RI`, `kappa`: Center and width of initial Gaussian guess for ITP (in Å)
-- **`&ini_state`** — `initial_distribution`: `"single vibrational state"`, `"gaussian distribution"`, or `"Boltzmann distribution"`; `N_ini`, `v_ini`: Initial electronic and vibrational state indices; `RI_tdse`, `kappa_tdse`: Gaussian parameters for TDSE
+| Key | Type | Unit | Description |
+|-----|------|------|-------------|
+| `R_points` | int | — | Number of points on the nuclear (R) grid |
+| `R_min` | float | Å | Minimum R coordinate |
+| `R_max` | float | Å | Maximum R coordinate |
+| `x_points` | int | — | Number of points on the electronic (x) grid |
+| `x_min` | float | Å | Minimum x coordinate |
+| `x_max` | float | Å | Maximum x coordinate |
 
-#### Laser Parameters
-- **`&laser_param`** — Two independent laser fields with:
-  - `envelope_shape_laser1/2`: `"cos2"`, `"gaussian"`, or `"trapezoidal"`
-  - `lambda1/2`: Wavelength (nm)
-  - `tp1/2`: Pulse duration (fs)
-  - `t_mid1/2`: Center time (fs)
-  - `E01/2`: Peak electric field amplitude (a.u.)
-  - `phi1/2`: Carrier-envelope phase (in units of π)
-  - `rise_time1/2`: Rise time for trapezoidal pulses (fs)
+#### `[system]` — Physical System
 
-#### Propagation & Parallelization
-- **`&propagation_method`** — `propagator_method`: `"split_operator"` or `"rk4"`
-- **`&absorber_choice`** — `absorber`: `"mask"` or `"CAP"`
-- **`&parallelization`** — `prop_par_FFTW`, `ITP_par_FFTW`: FFTW threading (`"parallel"` or `""`)
-- **`&openmp_threads`** — `omp_nthreads`: Number of OpenMP threads (0 = auto)
+| Key | Type | Description |
+|-----|------|-------------|
+| `m1` | float | Mass of nucleus 1 (amu) |
+| `m2` | float | Mass of nucleus 2 (amu) |
+| `Nstates` | int | Number of electronic BO states |
+| `sc_kind` | string | Soft-core potential: `"on_grid"` or `"static"` |
+| `sc_params` | string | Soft-core parameter filename (if `sc_kind = "on_grid"`) |
+| `bo_pot_kind` | string | BO potential: `"on_nuclr_grid"` or `"Morse"` |
+| `CalcMode` | string | `"Lab"`, `"KH"`, or `"KH_td"` |
+| `guess_vstates` | int | Max vibrational states to compute |
 
-#### File Paths
-- **`&input_files`** — `input_data_dir`: Directory containing input potential/data files
-- **`&output_files`** — `output_data_dir`: Directory for output files
+#### `[time]` — Time Grid
+
+| Key | Type | Unit | Description |
+|-----|------|------|-------------|
+| `dt` | float | a.u. | Time step |
+| `Nt` | int | — | Number of time steps |
+
+#### `[initial_guess]` — ITP Initial Guess
+
+| Key | Type | Unit | Description |
+|-----|------|------|-------------|
+| `RI` | float | Å | Center of initial Gaussian |
+| `kappa` | float | — | Width of initial Gaussian (negative) |
+
+#### `[initial_state]` — TDSE Initial Wavefunction
+
+| Key | Type | Description |
+|-----|------|-------------|
+| `distribution` | string | `"single_vibrational"`, `"gaussian"`, or `"boltzmann"` |
+| `N_ini` | int | Initial electronic state index |
+| `v_ini` | int | Initial vibrational state index |
+| `RI_tdse` | float | Gaussian center for TDSE (Å) |
+| `kappa_tdse` | float | Gaussian std dev for TDSE |
+
+#### `[io]` — Input/Output Paths
+
+| Key | Type | Description |
+|-----|------|-------------|
+| `input_data_dir` | string | Directory with input potential/data files |
+| `output_data_dir` | string | Directory for output files |
+| `adb_pot` | string | Filename for BO potential curves |
+| `trans_dip_prefix` | string | Optional prefix for dipole files |
+
+#### `[methods]` — Propagation & Numerics
+
+| Key | Type | Description |
+|-----|------|-------------|
+| `absorber` | string | `"mask"` or `"CAP"` |
+| `propagator` | string | `"split_operator"` or `"rk4"` |
+| `gauge` | string | `"length"` or `"velocity"` |
+| `total_trans_off` | int | Number of transitions to switch off |
+| `trans_off` | string | Space-separated transition pairs (e.g., `"12 23"`) |
+
+#### `[parallel]` — Parallelization
+
+| Key | Type | Description |
+|-----|------|-------------|
+| `prop_fftw` | string | TDSE FFTW: `"parallel"` or `""` |
+| `itp_fftw` | string | ITP FFTW: `"parallel"` or `""` |
+| `omp_nthreads` | int | Number of OpenMP threads (`0` = auto) |
+
+#### `[[laser.pulses]]` — Laser Parameters (Array of Tables)
+
+Add one `[[laser.pulses]]` block per laser pulse. Any number of pulses is supported.
+
+| Key | Type | Unit | Description |
+|-----|------|------|-------------|
+| `envelope` | string | — | `"cos2"`, `"sin2"`, `"gaussian"`, or `"trapezoidal"` |
+| `lambda` | float | nm | Wavelength |
+| `tp` | float | fs | Pulse duration (FWHM for gaussian; total width for sin²/cos²; flat-top width for trapezoidal) |
+| `t_mid` | float | fs | Pulse midpoint time |
+| `alpha0` | float | a.u. | Quiver amplitude |
+| `phi` | float | π | Carrier-envelope phase (0.0 to 2.0) |
+| `rise_time` | float | fs | Rise/fall time (trapezoidal only) |
 
 ---
 
@@ -215,28 +273,31 @@ All simulation parameters are specified in the input file via Fortran namelists.
 
 All output is written to the specified output directory, organized into subdirectories:
 
-- **`time_propagation_data_1d/`** (1D propagation):
-  - `norm_1d.out` — Time-dependent wavefunction norm
-  - `density_1d_pm3d.out` — Ground-state density map (pm3d format)
-  - `ex_density_1d_pm3d.out` — Excited-state density map
-  - `avgR_1d.out` — Expectation value ⟨R⟩(t)
-  - `vibpop1D_lambda.out` — Vibrational population time-evolution
-  - `KER_spectra_from_state_g*.out` — Kinetic Energy Release spectra (normalized and unnormalized)
-  - `momt_spectra_from_state_g*.out` — Momentum spectra
-  - `psi_outR_*` — Absorbed wavepacket analysis
-
-- **`time_propagation_data_2d/`** (2D propagation):
-  - `norm_2d.out` — Time-dependent norm
-  - `td-density_R.out`, `td-density_x.out` — Time-dependent R and x density maps
-  - `avgR_2d.out`, `avgx_2d.out` — Expectation values ⟨R⟩(t), ⟨x⟩(t)
-  - `field_2d.out` — Electric field and vector potential time-history
-  - `psi_outR_*` — Absorbed/dissociated wavepacket analysis
-
-- **`nuclear_wavepacket_data/`** — Vibrational eigenstates and energies for each electronic state
+```
+<output_data_dir>/
+├── pulse_data/                  # Laser pulse electric field & vector potential
+├── nuclear_wavepacket_data/     # Vibrational eigenstates & energies for each electronic state
+├── adiabatic_data/              # Adiabatic electronic wavefunction data
+└── time_prop/
+    ├── 1d/                      # 1D propagation output
+    │   ├── norm_1d.out          # Wavefunction norm vs. time
+    │   ├── avgR_1d.out          # Expectation value ⟨R⟩(t)
+    │   ├── density_1d_pm3d.out  # Ground-state density map (pm3d)
+    │   ├── vibpop1D_lambda.out  # Vibrational population time-evolution
+    │   └── KER_spectra_from_state_g*.out  # Kinetic Energy Release spectra
+    └── 2d/                      # 2D propagation output
+        ├── norm_2d.out          # Wavefunction norm vs. time
+        ├── avgR_2d.out          # Expectation value ⟨R⟩(t)
+        ├── avgx_2d.out          # Expectation value ⟨x⟩(t)
+        ├── td-density_R.out     # Time-dependent R density map
+        ├── td-density_x.out     # Time-dependent x density map
+        └── field_2d.out         # Electric field & vector potential
+```
 
 ---
 
 ## References
+
 TODO
 
 ---

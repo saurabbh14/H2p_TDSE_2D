@@ -4,6 +4,7 @@ IO_mod_sources = files('commandlinemodule.f08',
            'global_vars.f08',
            'data_au.f08',
            'pot_param.f08',
+           'toml_parser.f08',
            'readinputmodule.f08',
            'printinput.f08',
            'output_dir.f08')
