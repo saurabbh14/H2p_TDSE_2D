@@ -11,7 +11,7 @@ module propagation2d_mod
     use omp_lib
     implicit none
     private
-    public :: time_prop_2d, propagation_2D
+    public :: time_prop_2d, propagation_2D, dipole_acc_update_dpotdx
 
     ! Module-level private variables for dipole FFT operations
     ! Shared 1D C2C FFT plans for x-direction (used by dipole_vel_x)
@@ -535,6 +535,11 @@ contains
                 end select
             end if
 
+            ! In KH-td mode, update potential gradient for dipole_acc_x
+            if (trim(CalcMode) == "KH_td") then
+                call dipole_acc_update_dpotdx(pot_kh)
+            end if
+
             call density(this%psi, this%idensR, this%idensx)
             call integ_2D(this%psi, norm)
  
@@ -542,7 +547,11 @@ contains
             evR = evR / norm
             evx = dipole_x(this%psi, norm)
             velx = dipole_vel_x(this%psi, norm, A(k))
-            accx = dipole_acc_x(this%psi, norm, E(k))
+            if (trim(CalcMode) == "KH_td") then
+                accx = dipole_acc_x(this%psi, norm, E(k))
+            else
+                accx = dipole_acc_x(this%psi, norm, E(k))
+            end if
 
             ! write time dependent outputs to files
             write(this%avgR_2d_tk,*) time(k) * au2fs, evR !, sngl(epR)
@@ -933,6 +942,22 @@ contains
 
     end subroutine dipole_fft_finalize
 
+    !> Recompute potential gradient ∂V/∂x from a given potential (e.g. KH potential).
+    !! Called from time_evolution in KH-td mode at each time step.
+    subroutine dipole_acc_update_dpotdx(pot_in)
+        use global_vars, only: Nx, NR, dx
+        use differentiation, only: central_diff_on_grid
+        real(dp), intent(in) :: pot_in(NR, Nx)
+        real(dp) :: dpot_dx_row(Nx)
+        integer :: i
+
+        if (.not. allocated(dpot_dx)) allocate(dpot_dx(NR, Nx))
+        do i = 1, NR
+            call central_diff_on_grid(pot_in(i,:), Nx, dx, dpot_dx_row)
+            dpot_dx(i, :) = dpot_dx_row(:)
+        end do
+    end subroutine dipole_acc_update_dpotdx
+
     !> Compute dipole expectation value ⟨x⟩ via position-space quadrature.
     !! dipole_x = ∫ x·|ψ|² dx dR / norm
     function dipole_x(psi, norm) result(evx)
@@ -958,7 +983,7 @@ contains
     !! Uses shared 1D C2C FFT plans (dipole_fft_init must be called first).
     function dipole_vel_x(psi, norm, A_k) result(velx)
         use FFTW3
-        use global_vars, only: Nx, NR, Px, dpx, dx, dR, m_eff, kap, gauge_2d
+        use global_vars, only: Nx, NR, Px, dpx, dx, dR, m_eff, kap, gauge_2d, CalcMode
         complex(dp), intent(in) :: psi(NR, Nx)
         real(dp), intent(in) :: norm, A_k
         real(dp) :: velx
@@ -983,8 +1008,8 @@ contains
         end do
         velx = sum(Px(:) * idenspx(:)) * dx * dR / norm / m_eff
 
-        ! Velocity gauge: canonical momentum shifted by kap*A(t)
-        if (trim(adjustl(gauge_2d)) == "velocity") then
+        ! Velocity gauge / KH-td: canonical momentum shifted by kap*A(t)
+        if (trim(adjustl(gauge_2d)) == "velocity" .or. trim(CalcMode) == "KH_td") then
             velx = velx + kap * A_k / m_eff
         end if
 
