@@ -49,6 +49,10 @@ gauge           = "length"         # "length" or "velocity"
 total_trans_off = 0
 trans_off       = ""
 
+[snapshots]
+enabled = false       # whether to write 2D wavefunction density snapshots
+num_frames = 50       # total number of frames evenly distributed across propagation
+
 [parallel]
 prop_fftw     = "parallel"   # "parallel" or ""
 itp_fftw      = ""           # "parallel" or ""

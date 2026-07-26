@@ -2,7 +2,8 @@ module propagation2d_mod
     use iso_c_binding, only: C_DOUBLE, C_PTR, C_SIZE_T
     use varprecision, only: dp
     use global_vars, only: Nt, Nx, NR, Nstates, guess_vstates, &
-        & R, x, dR, dx, dt, m_eff, m_red, pR, Px, kap, lam, time, gauge_2d
+        & R, x, dR, dx, dt, m_eff, m_red, pR, Px, kap, lam, time, gauge_2d, &
+        & snapshots_enabled, snapshot_frames
     use data_au, only: au2eV, im
     use split_operator_2d_mod, only: split_operator_2d_type
     use rk4_operator_2d_mod, only: rk4_operator_2d_type
@@ -599,9 +600,12 @@ contains
                 end if
             endif
 
-            if (mod(K, Nt/td_points/4) .eq. 0 .and. K < 3*Nt/4) then
-                call wavefunction_density_snapshot(this%psi, time(k))
-            endif
+            if (snapshots_enabled) then
+                if (snapshot_frames > 0 .and. mod(K, 3*Nt/4/snapshot_frames) .eq. 0 &
+                    & .and. K <  3*Nt/4) then
+                    call wavefunction_density_snapshot(this%psi, time(k))
+                end if
+            end if
 
 
             ! absorbed wavepacket

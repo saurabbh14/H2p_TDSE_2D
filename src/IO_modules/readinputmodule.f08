@@ -87,6 +87,11 @@ contains
         buf               = cfg%get_string("methods", "trans_off",       "")
         trans_off         = trim(buf)
 
+        ! ----- snapshots -----
+        buf               = cfg%get_string("snapshots", "enabled",     "false")
+        snapshots_enabled = (trim(buf) == "true" .or. trim(buf) == "1")
+        snapshot_frames   = cfg%get_int    ("snapshots", "num_frames", 50)
+
         ! ----- parallel -----
         buf           = cfg%get_string("parallel", "prop_fftw",    "parallel")
         prop_par_FFTW = trim(buf)

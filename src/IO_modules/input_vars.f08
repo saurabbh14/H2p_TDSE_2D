@@ -67,6 +67,10 @@ module InputVars
     ! OMP threads (optional)
     integer :: omp_nthreads
 
+    ! Wavefunction density snapshots (optional 2D dumps)
+    logical :: snapshots_enabled = .false.   ! whether to write 2D density snapshots
+    integer :: snapshot_frames = 50          ! total number of frames across propagation
+
     ! Propagation method selection
     character(2000):: propagator_method  ! "split_operator" | "rk4"
 
