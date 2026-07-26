@@ -22,6 +22,10 @@ module pulse_mod
         real(dp) :: phi        = 0._dp     ! phase in rad
         real(dp) :: rise_time  = 0._dp     ! rise time in a.u. (trapezoidal)
         real(dp) :: pulse_offset = 0._dp   ! internal offset (always 0 for now)
+        integer  :: cycles_rise  = 0       ! optical cycles during rise (trapezoidal)
+        integer  :: cycles_flat  = 0       ! optical cycles during flat-top (trapezoidal)
+        integer  :: cycles_fall  = 0       ! optical cycles during fall (trapezoidal)
+        integer  :: cycles_total = 0       ! total optical cycles
         real(dp), allocatable :: alpha_t(:)   ! quiver field  alpha(t)
         real(dp), allocatable :: E_field(:)   ! electric field E(t)
         real(dp), allocatable :: A_field(:)   ! vector potential A(t)
@@ -80,6 +84,18 @@ contains
                 pl%rise_time = pl%rise_time / au2fs
                 pl%omega     = (1._dp / (pl%lambda * 1.e-7_dp)) * cm2au
                 pl%phi       = pl%phi       * pi
+                ! Compute optical cycle counts
+                select case(trim(pl%envelope_shape))
+                case("trapezoidal")
+                    pl%cycles_rise = nint(pl%rise_time * pl%omega / (2._dp * pi))
+                    pl%cycles_flat = nint(pl%tp * pl%omega / (2._dp * pi))
+                    pl%cycles_fall = pl%cycles_rise
+                    pl%cycles_total = pl%cycles_rise + pl%cycles_flat + pl%cycles_fall
+                case("sin2")
+                    pl%cycles_total = nint(pl%tp * pl%omega / (2._dp * pi))
+                case default
+                    pl%cycles_total = nint(pl%tp * pl%omega / (2._dp * pi))
+                end select
             end associate
         end do
     end subroutine initialize_from_lasers
@@ -106,6 +122,15 @@ contains
                 print*, "  Pulse midpoint:  ", sngl(pl%t_mid * au2fs), "fs"
                 print*, "  Phase (phi):     ", sngl(pl%phi / pi), "pi"
                 print*, "  Rise time:       ", sngl(pl%rise_time * au2fs), "fs"
+                if (trim(pl%envelope_shape) == "trapezoidal") then
+                    print*, "  Optical cycles:"
+                    print*, "    - Rise:  ", pl%cycles_rise
+                    print*, "    - Flat:  ", pl%cycles_flat
+                    print*, "    - Fall:  ", pl%cycles_fall
+                    print*, "    - Total: ", pl%cycles_total
+                else
+                    print*, "  Total optical cycles:", pl%cycles_total
+                end if
             end associate
         end do
         print*, "------------------------------------------------------"
@@ -183,6 +208,7 @@ contains
             n_cycles = int(pl%tp * pl%omega / (2._dp * pi)) + 1
             n_cycles = max(n_cycles, 1)
             tp_eff = 2._dp * pi * real(n_cycles, dp) / pl%omega
+            pl%cycles_total = n_cycles
             do k = 1, Nt
                 pl%env(k)    = sin2(time(k), tp_eff, pl%t_mid, pl%pulse_offset)
                 pl%alpha_t(k) = pl%alpha0 * pl%env(k) &
@@ -208,6 +234,10 @@ contains
             n_cycles = int(pl%rise_time * pl%omega / (2._dp * pi)) + 1
             n_cycles = max(n_cycles, 1)
             TU_eff = 2._dp * pi * real(n_cycles, dp) / pl%omega
+            pl%cycles_rise = n_cycles
+            pl%cycles_flat = nint(pl%tp * pl%omega / (2._dp * pi))
+            pl%cycles_fall = n_cycles
+            pl%cycles_total = pl%cycles_rise + pl%cycles_flat + pl%cycles_fall
             print*, trim(label) // " trapezoidal boundary times (fs):"
             print'(a,f10.4)', "  Pulse start: ", (pl%t_mid - pl%tp/2 - TU_eff + pl%pulse_offset)*au2fs
             print'(a,f10.4)', "  Rise end:    ", (pl%t_mid - pl%tp/2 + pl%pulse_offset)*au2fs

@@ -22,4 +22,5 @@ module global_vars
     character(len=2000) :: time_prop_dir    ! output directory path for time propagation data
     character(len=2000) :: time_prop_dir_1d    ! output directory path for 1d time propagation data
     character(len=2000) :: time_prop_dir_2d    ! output directory path for 2d time propagation data 
+    character(len=2000) :: time_prop_dir_2d_snapshot ! output directory path for 2d wavefunction density snapshots
 end module global_vars

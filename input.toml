@@ -59,7 +59,7 @@ omp_nthreads  = 0            # 0 = use all available threads
 envelope  = "sin2"       # "cos2" | "sin2" | "gaussian" | "trapezoidal"
 lambda    = 228.0        # wavelength in nm
 tp        = 8.0          # pulse duration in fs (FWHM for gaussian, total width for sin2/cos2, flat-top for trapezoidal)
-t_mid     = 15.0         # pulse midpoint in fs
+t_mid     = 10.0         # pulse midpoint in fs
 alpha0    = 2.5          # quiver amplitude in a.u.
 phi       = 0.0          # carrier-envelope phase in units of pi
 rise_time = 4.0          # rise/fall time in fs (only used for trapezoidal)

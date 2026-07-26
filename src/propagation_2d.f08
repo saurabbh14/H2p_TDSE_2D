@@ -378,6 +378,7 @@ contains
         type(split_operator_2d_type) :: split_operator_2d
         type(rk4_operator_2d_type)   :: rk4_operator_2d
         integer :: i, j, k
+        integer :: td_points = 250  ! Number of time points for density output
         integer :: max_num_threads
         real(dp) :: evR, evx, velx, accx, epx, epR
         real(dp) :: norm
@@ -571,7 +572,7 @@ contains
             write(this%avgvelx_2d_tk,*) time(k) * au2fs, velx
             write(this%avgaccx_2d_tk,*) time(k) * au2fs, accx
             
-            if(mod(K,50).eq.0) then
+            if(mod(K, Nt/td_points) .eq. 0) then
                 ! R density map  
                 do i = 1, NR, 4
                     write(this%dens_R_tk,*) time(k) * au2fs, R(i), this%idensR(i)
@@ -597,6 +598,11 @@ contains
                     write(this%dens_x_tk, *)
                 end if
             endif
+
+            if (mod(K, Nt/td_points/4) .eq. 0 .and. K < 3*Nt/4) then
+                call wavefunction_density_snapshot(this%psi, time(k))
+            endif
+
 
             ! absorbed wavepacket
             do j = 1, Nx
@@ -726,6 +732,45 @@ contains
 
         return
     end subroutine
+
+    !........................................................................
+    subroutine wavefunction_density_snapshot(psi, currTime)
+
+        use global_vars, only: NR, Nx, dx, dR, time_prop_dir_2d_snapshot
+        use data_au, only: au2fs
+
+        implicit none
+
+        integer:: I, J
+        character(2000):: filename
+        character(5):: divider
+        double precision,intent(in):: currTime
+        complex*16,intent(in):: psi(NR,Nx)
+
+        if (currTime < 10._dp) then
+            write(filename, '(a,a,f4.2,a)') adjustl(trim(time_prop_dir_2d_snapshot)), &
+                & "wavefunction_density_at_time_", currTime * au2fs, ".out"
+        else
+            write(filename, '(a,a,f5.2,a)') adjustl(trim(time_prop_dir_2d_snapshot)), &
+                & "wavefunction_density_at_time_", currTime * au2fs, ".out"
+        end if
+        open(506, file=adjustl(trim(filename)), status='unknown')
+
+        ! Writing header for wavefunction density snapshot file
+        write(506, '(a,a,a,a,a)') "# R-grid(a.u.) ", divider, &
+            & "x-grid(a.u.)", divider, &
+            & "Wavefunction density "
+        ! Writing wavefunction density snapshot to file
+        do I = 1, NR, 4
+            do J = 1, Nx, 4
+                write(506,*) R(I), x(J), abs(psi(I,J))**2
+            end do
+            write(506,*)
+        end do
+        close(506)
+
+        return
+    end subroutine wavefunction_density_snapshot
 
     !........................................................................
 
