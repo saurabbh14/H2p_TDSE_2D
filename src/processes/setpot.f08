@@ -2,7 +2,7 @@ module setpot_mod
     use varprecision, only: dp
     use data_au, only: au2a, au2eV, pi
     use global_vars, only: R, x, NR, Nx, mn1, mn2, output_data_dir, &
-        & Pot, zeff, alpha2, alpha0, CalcMode, dt
+        & Pot, zeff, alpha2, alpha0, CalcMode, dt, kap, m_eff
     implicit none
     private
     public :: build_2d_potential, build_kh_potential_at_time
@@ -97,8 +97,8 @@ contains
 
         do J = 1, Nx
             ! Electronic coordinate shifted by quiver displacement alpha_val
-            dx1(:) = (x(J) + alpha_val) - mn1 * R(:)
-            dx2(:) = (x(J) + alpha_val) + mn2 * R(:)
+            dx1(:) = (x(J) + kap/m_eff * alpha_val) - mn1 * R(:)
+            dx2(:) = (x(J) + kap/m_eff * alpha_val) + mn2 * R(:)
             v1e(:) = -zeff(:) / sqrt(dx1(:) * dx1(:) + alpha2(:))
             v2e(:) = -zeff(:) / sqrt(dx2(:) * dx2(:) + alpha2(:))
             pot_KH(:, J) = v12(:) + v1e(:) + v2e(:)

@@ -559,8 +559,8 @@ contains
             write(this%field_2d_tk,*) time(k) * au2fs, E(k), A(k)
 
             if (trim(CalcMode) == "KH_td") then
-                ! Lab-frame avgx = KH-frame avgx + alpha(t)
-                write(this%avgx_2d_tk,*) time(k) * au2fs, evx + alpha_t(k)
+                ! Lab-frame avgx = KH-frame avgx + (kap/m_eff) * alpha(t)
+                write(this%avgx_2d_tk,*) time(k) * au2fs, evx + kap/m_eff * alpha_t(k)
                 ! KH-frame avgx (stored in separate file)
                 write(this%avgx_kh_2d_tk,*) time(k) * au2fs, evx
             else
@@ -579,9 +579,9 @@ contains
                 write(this%dens_R_tk, *)
 
                 if (trim(CalcMode) == "KH_td") then
-                    ! Lab-frame x density: shift x-coordinate by -alpha(t)
+                    ! Lab-frame x density: shift x-coordinate by (kap/m_eff) * alpha(t)
                     do j = Nx/4, 3*Nx/4
-                        write(this%dens_x_tk,*) time(k) *au2fs, x(j) + alpha_t(k), this%idensx(j)
+                        write(this%dens_x_tk,*) time(k) *au2fs, x(j) + kap/m_eff * alpha_t(k), this%idensx(j)
                     enddo
                     write(this%dens_x_tk, *)
                     ! KH-frame x density: unchanged coordinates
@@ -953,7 +953,7 @@ contains
 
         if (.not. allocated(dpot_dx)) allocate(dpot_dx(NR, Nx))
         do i = 1, NR
-            call central_diff_on_grid(pot_in(i,:), Nx, dx, dpot_dx_row)
+            call central_diff_on_grid(pot_in(i,:), Nx, dx, dpot_dx_row, 5)
             dpot_dx(i, :) = dpot_dx_row(:)
         end do
     end subroutine dipole_acc_update_dpotdx
@@ -1032,7 +1032,7 @@ contains
         if (.not. allocated(dpot_dx)) then
             allocate(dpot_dx(NR, Nx))
             do i = 1, NR
-                call central_diff_on_grid(pot(i,:), Nx, dx, dpot_dx_row)
+                call central_diff_on_grid(pot(i,:), Nx, dx, dpot_dx_row, 5)
                 dpot_dx(i, :) = dpot_dx_row(:)
             end do
             print*, "Dipole acceleration: ∂V/∂x precomputed."
