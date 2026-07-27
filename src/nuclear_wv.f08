@@ -53,10 +53,8 @@ contains
 
     !> Initialize/allocate arrays and convert units for calculation
     subroutine initialize_wp_params(this)
-        use data_au, only: au2a
         class(nuclear_wavefkt_class), intent(inout) :: this
-        ! Convert initial Gaussian center from Angstrom (or given units) to atomic units
-        this%RI = this%RI / au2a
+        ! RI is now already in atomic units from input
         allocate(this%Files_exist(Nstates))
         this%Files_exist = .false.
         allocate(this%vib_en_tk(Nstates), this%chi0_vib_en_tk(Nstates), this%chi0_tk(Nstates))

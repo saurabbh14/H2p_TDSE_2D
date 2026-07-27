@@ -18,8 +18,8 @@ module InputVars
 
     ! R-grid
     integer(C_INT):: NR, Nx                    ! number of grid points (coordinate space)
-    real(dp) :: Rmin, xmin                       ! grid minimum (positive) in Angs
-    real(dp) :: Rmax, xmax                       ! grid maximum in Angs
+    real(dp) :: Rmin, xmin                       ! grid minimum in a.u.
+    real(dp) :: Rmax, xmax                       ! grid maximum in a.u.
     
     ! electronic states
     integer:: Nstates                      ! number of electronic BO states
@@ -27,7 +27,7 @@ module InputVars
     character(2000):: sc_params     ! filename for soft-core parameters if sc_kind = "on_grid"
     character(2000):: CalcMode = "Lab"      ! "Lab" | "KH" (cycle-avg) | "KH_td" (time-dep KH)
     character(200):: bo_pot_kind         ! "on_nuclr_grid" | "Morse" (select potential source)
-    real(dp):: alpha0                     ! alpha0 for KH potential (in Angstrom)
+    real(dp):: alpha0                     ! alpha0 for KH potential (in a.u.)
 
     ! vibrational states 
     integer:: guess_vstates                ! number of vibrational eigenstates to compute
@@ -40,12 +40,12 @@ module InputVars
     real(dp):: m1, m2                      ! masses of particle 1 and 2 (in code units before conversion)
     
     ! guess initial wavefunction
-    real(dp):: RI, kappa                   ! RI: center of initial Gaussian (units: Angstrom unless converted)
+    real(dp):: RI, kappa                   ! RI: center of initial Gaussian (in a.u.)
     
     ! initial TDSE state (how to prepare the initial wavefunction for real-time propagation)
     integer:: N_ini, v_ini                 ! N_ini: electronic state index; v_ini: vibrational quantum number
     integer, allocatable:: v_dist_ini(:)   ! optional explicit vibrational-population vector
-    real(dp):: temperature, kappa_tdse, RI_tdse ! parameters used for Boltzmann/Gaussian TDSE initial distributions
+    real(dp):: temperature, kappa_tdse, RI_tdse ! TDSE initial distribution parameters (a.u.)
     character(2000):: initial_distribution ! string selecting initial distribution type ("single vibrational state", "Boltzmann distribution", etc.)
     
     ! input / output file paths and prefixes
@@ -70,6 +70,17 @@ module InputVars
     ! Wavefunction density snapshots (optional 2D dumps)
     logical :: snapshots_enabled = .false.   ! whether to write 2D density snapshots
     integer :: snapshot_frames = 50          ! total number of frames across propagation
+
+    ! Time-dependent density output controls
+    integer :: td_density_points = 250       ! number of time points in td density output
+
+    ! Output grid resolution & cropping
+    integer :: output_R_stride = 4           ! stride for R-grid in density/snapshot output
+    integer :: output_x_stride = 4           ! stride for x-grid in density/snapshot output
+    real(dp) :: output_R_start = 0.0_dp      ! fraction of R grid where output starts
+    real(dp) :: output_R_end   = 1.0_dp      ! fraction of R grid where output ends
+    real(dp) :: output_x_start = 0.25_dp     ! fraction of x grid where output starts
+    real(dp) :: output_x_end   = 0.75_dp     ! fraction of x grid where output ends
 
     ! Propagation method selection
     character(2000):: propagator_method  ! "split_operator" | "rk4"

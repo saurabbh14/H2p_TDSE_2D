@@ -1,15 +1,15 @@
 # TDSE 2D — Simulation Input File
 # This file replaces the old Fortran namelist input.ini
-# All lengths in Angstrom (1 Å = 10^-10 m), times in femtoseconds,
+# All lengths/distances in atomic units (a.u.), times in femtoseconds,
 # wavelengths in nm, phases in units of pi, quiver amplitude in a.u.
 
 [grid]
 R_points  = 512        # number of R-grid points (NR)
-R_min     = 0.1        # minimum R in Angstrom
-R_max     = 51.2       # maximum R in Angstrom
+R_min     = 0.1        # minimum R in a.u.
+R_max     = 51.2       # maximum R in a.u.
 x_points  = 1024       # number of x-grid points (Nx)
-x_min     = -102.4     # minimum x in Angstrom
-x_max     = 102.4      # maximum x in Angstrom
+x_min     = -102.4     # minimum x in a.u.
+x_max     = 102.4      # maximum x in a.u.
 
 [system]
 m1            = 1.0          # mass of nucleus 1 (amu)
@@ -26,14 +26,14 @@ dt = 0.05        # time step in a.u.
 Nt = 25000       # number of time steps
 
 [initial_guess]
-RI    = 0.7      # center of initial Gaussian (Angstrom)
+RI    = 0.7      # center of initial Gaussian (a.u.)
 kappa = -5.0     # width of initial Gaussian (negative)
 
 [initial_state]
 distribution = "single vibrational state"  # "single vibrational state" | "gaussian distribution" | "Boltzmann distribution"
 N_ini        = 1          # initial electronic state index
 v_ini        = 1          # initial vibrational state index
-RI_tdse      = 1.5        # Gaussian center for TDSE (Angstrom)
+RI_tdse      = 1.5        # Gaussian center for TDSE (a.u.)
 kappa_tdse   = -5.0       # Gaussian std dev for TDSE
 
 [io]
@@ -52,6 +52,17 @@ trans_off       = ""
 [snapshots]
 enabled = false       # whether to write 2D wavefunction density snapshots
 num_frames = 50       # total number of frames evenly distributed across propagation
+
+[output.td_density]
+num_points = 250      # number of time points for td-density_R.out and td-density_x.out
+
+[output.grid]
+R_stride = 4          # output every Nth R-grid point in density/snapshot files
+x_stride = 4          # output every Nth x-grid point in density/snapshot files
+R_start  = 0.0        # fraction of R grid where output begins (0.0 = first point)
+R_end    = 1.0        # fraction of R grid where output ends   (1.0 = last point)
+x_start  = 0.25       # fraction of x grid where output begins
+x_end    = 0.75       # fraction of x grid where output ends
 
 [parallel]
 prop_fftw     = "parallel"   # "parallel" or ""

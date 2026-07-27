@@ -3,7 +3,9 @@ module propagation2d_mod
     use varprecision, only: dp
     use global_vars, only: Nt, Nx, NR, Nstates, guess_vstates, &
         & R, x, dR, dx, dt, m_eff, m_red, pR, Px, kap, lam, time, gauge_2d, &
-        & snapshots_enabled, snapshot_frames
+        & snapshots_enabled, snapshot_frames, &
+        & td_density_points, output_R_stride, output_x_stride, &
+        & output_R_start, output_R_end, output_x_start, output_x_end
     use data_au, only: au2eV, im
     use split_operator_2d_mod, only: split_operator_2d_type
     use rk4_operator_2d_mod, only: rk4_operator_2d_type
@@ -22,6 +24,9 @@ module propagation2d_mod
     ! Precomputed gradient of potential ∂V/∂x (used by dipole_acc_x)
     real(dp), allocatable, private :: dpot_dx(:,:)
     logical, private :: dip_plans_initialized = .false.
+
+    ! output density crop indices
+    integer, private :: iR_start, iR_end, ix_start, ix_end  
 
     !> Type to hold all data and methods for 2D time propagation
     type :: time_prop_2d
@@ -379,7 +384,6 @@ contains
         type(split_operator_2d_type) :: split_operator_2d
         type(rk4_operator_2d_type)   :: rk4_operator_2d
         integer :: i, j, k
-        integer :: td_points = 250  ! Number of time points for density output
         integer :: max_num_threads
         real(dp) :: evR, evx, velx, accx, epx, epR
         real(dp) :: norm
@@ -450,6 +454,12 @@ contains
 
         ! Initialize shared 1D FFT plans for dipole velocity computation
         call dipole_fft_init(Nx)
+
+        ! Precompute output crop indices from fractional ranges
+        iR_start = max(1, nint(output_R_start * NR))
+        iR_end   = min(NR, nint(output_R_end * NR))
+        ix_start = max(1, nint(output_x_start * Nx))
+        ix_end   = min(Nx, nint(output_x_end * Nx))
 
         timeloop: do k = 1, Nt
             if (mod(k,1000) .eq. 0 .and. time(k)*au2fs .lt. 100._dp) then
@@ -573,40 +583,37 @@ contains
             write(this%avgvelx_2d_tk,*) time(k) * au2fs, velx
             write(this%avgaccx_2d_tk,*) time(k) * au2fs, accx
             
-            if(mod(K, Nt/td_points) .eq. 0) then
+            if(mod(K, Nt/td_density_points) .eq. 0) then
                 ! R density map  
-                do i = 1, NR, 4
+                do i = iR_start, iR_end, output_R_stride
                     write(this%dens_R_tk,*) time(k) * au2fs, R(i), this%idensR(i)
                 enddo
                 write(this%dens_R_tk, *)
 
                 if (trim(CalcMode) == "KH_td") then
                     ! Lab-frame x density: shift x-coordinate by (kap/m_eff) * alpha(t)
-                    do j = Nx/4, 3*Nx/4
+                    do j = ix_start, ix_end, output_x_stride
                         write(this%dens_x_tk,*) time(k) *au2fs, x(j) + kap/m_eff * alpha_t(k), this%idensx(j)
                     enddo
                     write(this%dens_x_tk, *)
                     ! KH-frame x density: unchanged coordinates
-                    do j = Nx/4, 3*Nx/4
+                    do j = ix_start, ix_end, output_x_stride
                         write(this%dens_x_kh_tk,*) time(k) *au2fs, x(j), this%idensx(j)
                     enddo
                     write(this%dens_x_kh_tk, *)
                 else
                     ! x density map  
-                    do j = Nx/4, 3*Nx/4
+                    do j = ix_start, ix_end, output_x_stride
                         write(this%dens_x_tk,*) time(k) *au2fs, x(j), this%idensx(j)
                     enddo
                     write(this%dens_x_tk, *)
                 end if
             endif
 
-            if (snapshots_enabled) then
-                if (snapshot_frames > 0 .and. mod(K, 3*Nt/4/snapshot_frames) .eq. 0 &
-                    & .and. K <  3*Nt/4) then
+            if (snapshots_enabled .and. snapshot_frames > 0 .and. &
+                mod(K, 3*Nt/4/snapshot_frames) .eq. 0 .and. K <  3*Nt/4) then
                     call wavefunction_density_snapshot(this%psi, time(k))
-                end if
             end if
-
 
             ! absorbed wavepacket
             do j = 1, Nx
@@ -740,7 +747,9 @@ contains
     !........................................................................
     subroutine wavefunction_density_snapshot(psi, currTime)
 
-        use global_vars, only: NR, Nx, dx, dR, time_prop_dir_2d_snapshot
+        use global_vars, only: NR, Nx, R, x, dx, dR, time_prop_dir_2d_snapshot, &
+            & output_R_stride, output_x_stride, &
+            & output_R_start, output_R_end, output_x_start, output_x_end
         use data_au, only: au2fs
 
         implicit none
@@ -765,8 +774,8 @@ contains
             & "x-grid(a.u.)", divider, &
             & "Wavefunction density "
         ! Writing wavefunction density snapshot to file
-        do I = 1, NR, 4
-            do J = 1, Nx, 4
+        do I = iR_start, iR_end, output_R_stride
+            do J = ix_start, ix_end, output_x_stride
                 write(506,*) R(I), x(J), abs(psi(I,J))**2
             end do
             write(506,*)

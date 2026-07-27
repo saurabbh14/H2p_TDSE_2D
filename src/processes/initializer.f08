@@ -202,7 +202,7 @@ contains
                     read(sc_tk,*)
                 end do
                 close(sc_tk)
-                R = R / au2a
+                ! R is now already in atomic units from input data files
 
                 ! Also write a copy into output directory for verification
                 write(filepath,'(a,a,a)') adjustl(trim(output_data_dir)), adjustl(trim(sc_params)),&
@@ -273,7 +273,7 @@ contains
                 ! Fill only the ground state with a Morse potential at specific grid points
                 do i = 1, NR
                     R(i) = Rmin + (i-1)*dR
-                    adb(I,1) = morse_potential(0.17_dp,1.85_dp,0.743_dp/au2a,R(I))
+                    adb(I,1) = morse_potential(0.17_dp,1.85_dp,0.743_dp,R(I))
                 enddo
    
                 ! Write generated Morse surface to output 

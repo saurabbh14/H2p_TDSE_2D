@@ -92,6 +92,17 @@ contains
         snapshots_enabled = (trim(buf) == "true" .or. trim(buf) == "1")
         snapshot_frames   = cfg%get_int    ("snapshots", "num_frames", 50)
 
+        ! ----- output.td_density -----
+        td_density_points = cfg%get_int("output.td_density", "num_points", 250)
+
+        ! ----- output.grid -----
+        output_R_stride = cfg%get_int ("output.grid", "R_stride", 4)
+        output_x_stride = cfg%get_int ("output.grid", "x_stride", 4)
+        output_R_start  = cfg%get_real("output.grid", "R_start",  0.0_dp)
+        output_R_end    = cfg%get_real("output.grid", "R_end",    1.0_dp)
+        output_x_start  = cfg%get_real("output.grid", "x_start",  0.25_dp)
+        output_x_end    = cfg%get_real("output.grid", "x_end",    0.75_dp)
+
         ! ----- parallel -----
         buf           = cfg%get_string("parallel", "prop_fftw",    "parallel")
         prop_par_FFTW = trim(buf)

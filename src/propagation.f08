@@ -81,7 +81,7 @@ contains
     subroutine ini_dist_choice(this)
         use global_vars, only: NR, Nstates, Vstates, v_ini, N_ini, Ri_tdse, kappa_tdse, &
             initial_distribution, R
-        use data_au, only: au2a, au2eV
+        use data_au, only: au2eV
         class(time_prop), intent(inout) :: this
         character(len=5):: divider
         integer :: i, N, v
@@ -101,9 +101,9 @@ contains
             case("gaussian distribution")
                 print*, "initial wavefunction is in..."
                 print*, N_ini-1, "electronic state and with a Gaussian distribution centered around",&
-                    & Ri_tdse/au2a, "a.u. \n with deviation of", kappa_tdse, "."
+                    & Ri_tdse, "a.u. \n with deviation of", kappa_tdse, "."
                 do i = 1, NR
-                    this%psi_ges(i,1)=exp(kappa_tdse*(R(i)-Ri_tdse/au2a)**2) 
+                    this%psi_ges(i,1)=exp(kappa_tdse*(R(i)-Ri_tdse)**2)
                 enddo
 
             ! case ("input dist")
