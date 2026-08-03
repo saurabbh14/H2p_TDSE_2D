@@ -760,12 +760,12 @@ contains
         double precision,intent(in):: currTime
         complex*16,intent(in):: psi(NR,Nx)
 
-        if (currTime < 10._dp) then
+        if (currTime * au2fs < 10._dp) then
             write(filename, '(a,a,f4.2,a)') adjustl(trim(time_prop_dir_2d_snapshot)), &
-                & "wavefunction_density_at_time_", currTime * au2fs, ".out"
+                & "wavefunction_density_at_time_0", currTime * au2fs, "fs.out"
         else
             write(filename, '(a,a,f5.2,a)') adjustl(trim(time_prop_dir_2d_snapshot)), &
-                & "wavefunction_density_at_time_", currTime * au2fs, ".out"
+                & "wavefunction_density_at_time_", currTime * au2fs, "fs.out"
         end if
         open(506, file=adjustl(trim(filename)), status='unknown')
 
