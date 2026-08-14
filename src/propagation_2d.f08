@@ -10,6 +10,7 @@ module propagation2d_mod
     use split_operator_2d_mod, only: split_operator_2d_type
     use rk4_operator_2d_mod, only: rk4_operator_2d_type
     use setpot_mod, only: build_kh_potential_at_time
+    use continuum_2d_mod, only: continuum_2d_type
     use FFTW3
     use omp_lib
     implicit none
@@ -58,11 +59,13 @@ module propagation2d_mod
         integer*8 :: planBR, planFR
 
         ! File Handles
-        integer :: psi_2d_tk, dens_R_tk, dens_x_tk, norm_2d_tk
+        integer :: psi_2d_tk, dens_R_tk, dens_x_tk
+        integer :: bound_norm_2d_tk, norm_2d_tk
         integer :: avgR_2d_tk, avgx_2d_tk, momt_2d_tk, norm_pn_2d_tk
         integer :: field_2d_tk
         integer :: abs_R_tk, abs_x_tk
         integer :: psi_outR_norm_2d_tk, psi_outR_Pdens_2d_tk
+        integer :: ion_yield_2d_tk
         ! KH-frame output files (for KH_td mode)
         integer :: dens_x_kh_tk, dens_R_kh_tk
         integer :: avgx_kh_2d_tk, avgR_kh_2d_tk
@@ -232,16 +235,15 @@ contains
         allocate(this%abs_R(NR), this%abs_x(Nx))
 
         print*
-        print*, "Absorber on R-grid is placed around the number of grid points from the end of the grid:"
-        this%i_cpmR = minloc(abs(R(:) - cpmR), 1) - 50
-        print*, "i_cpmR = ", this%i_cpmR, ", NR-i_cpmR", NR - this%i_cpmR
-        print*, "R(NR-i_cpmR) = ", R(NR - this%i_cpmR)
+        this%i_cpmR = minloc(abs(R(:) - cpmR), 1)
+        print*, "Absorber on R-grid is placed around the index", " NR-i_cpmR = ", NR-this%i_cpmR 
+        print*, "at R_abs = ", R(NR - this%i_cpmR), "a.u."
 
         print*
-        print*, "Absorber on x-grid is placed around the number of grid points from the both ends of the grid:"
-        this%i_cpmx = minloc(abs(x(:) - cpmx), 1) - 50
-        print*, "i_cpmx = ", this%i_cpmx, ", Nx-i_cpmx", Nx - this%i_cpmx
-        print*, "x(Nx-i_cpmx) = ", x(Nx - this%i_cpmx)
+        this%i_cpmx = minloc(abs(x(:) - x(Nx) + cpmx), 1)
+        print*, "Absorber on x-grid is placed around the indices", " i_cpmx = ", Nx - this%i_cpmx, &
+            & " and ", this%i_cpmx
+        print*, "at -x_abs = ", x(Nx - this%i_cpmx), "a.u.", "and x_abs = ", x(this%i_cpmx), "a.u."
 
         select case(absorber)
         case ("CAP")
@@ -311,6 +313,10 @@ contains
         write(filepath, '(a,a)') adjustl(trim(time_prop_dir_2d)), "norm_2d.out"
         open(newunit=this%norm_2d_tk,file=filepath,status='unknown')
         
+        ! time dependent norm after absorber application
+        write(filepath, '(a,a)') adjustl(trim(time_prop_dir_2d)), "bound_norm_2d.out"
+        open(newunit=this%bound_norm_2d_tk,file=filepath,status='unknown')
+
         ! time dependent R density 
         write(filepath, '(a,a)') adjustl(trim(time_prop_dir_2d)), "td-density_R.out"
         open(newunit=this%dens_R_tk,file=filepath,status='unknown')
@@ -332,7 +338,7 @@ contains
         ! time dependent norm in localized states
         write(filepath, '(a,a)') adjustl(trim(time_prop_dir_2d)), "norm_pn_2d.out"
         open(newunit=this%norm_pn_2d_tk,file=filepath,status='unknown')
-        
+
         ! time dependent electric field 
         write(filepath, '(a,a)') adjustl(trim(time_prop_dir_2d)), "field_2d.out"
         open(newunit=this%field_2d_tk,file=filepath,status='unknown')
@@ -348,6 +354,10 @@ contains
         ! time dependent norm of absorbed wavepacket
         write(filepath, '(a,a)') adjustl(trim(time_prop_dir_2d)), "psi_outR_norm_2d.out"
         open(newunit=this%psi_outR_norm_2d_tk,file=filepath,status='unknown')
+        
+        ! time dependent ionization yield
+        write(filepath, '(a,a)') adjustl(trim(time_prop_dir_2d)), "ionization_yield_2d.out"
+        open(newunit=this%ion_yield_2d_tk,file=filepath,status='unknown')
         
         ! time dependent momentum density of absorbed wavepacket 
         write(filepath, '(a,a)') adjustl(trim(time_prop_dir_2d)), "psi_outR_momt_density_2d_pm3d.out"
@@ -383,10 +393,11 @@ contains
         class(time_prop_2d), intent(inout) :: this
         type(split_operator_2d_type) :: split_operator_2d
         type(rk4_operator_2d_type)   :: rk4_operator_2d
+        type(continuum_2d_type) :: continuum_2d
         integer :: i, j, k
         integer :: max_num_threads
         real(dp) :: evR, evx, velx, accx, epx, epR
-        real(dp) :: norm
+        real(dp) :: norm, ionization_yield
         real(dp) :: E(Nt), A(Nt)
         real(dp) :: alpha_t(Nt)
         real(dp) :: E_half, A_half       ! fields at t + dt/2 for RK4
@@ -395,11 +406,9 @@ contains
         real(dp) :: E_zero, A_zero       ! zero fields for KH mode
         character(*), intent(in) :: propagator_method
         character(20) :: in_xR, out_x, out_R, out_xR
-        complex(dp), allocatable :: psi_out_R_tmp(:,:), psi_out_x_tmp(:,:)
-        complex(dp), allocatable :: psi_out_xR_tmp(:,:)
-        
-        allocate(psi_out_R_tmp(NR,Nx), psi_out_x_tmp(NR,Nx))
-        allocate(psi_out_xR_tmp(NR,Nx))
+        complex(dp), allocatable :: psi_out_R_tmp(:,:)
+
+        allocate(psi_out_R_tmp(NR,Nx))
 
         ! Initialize propagator based on selected method and gauge
         select case(trim(adjustl(propagator_method)))
@@ -422,6 +431,10 @@ contains
                 call split_operator_2d%kprop_gen_vel(A(1))
             end if
         end select
+
+        ! Initialize continuum 2D ionization propagator
+        call continuum_2d%initialize(Nx - this%i_cpmx, NR - this%i_cpmR, this%abs_x, this%abs_R, gauge_2d)
+        call continuum_2d%ionization_enable()
 
         ! Initial wavefunction gauge transformation for velocity gauge
         if (trim(adjustl(gauge_2d)) == "velocity") then
@@ -615,32 +628,41 @@ contains
                     call wavefunction_density_snapshot(this%psi, time(k))
             end if
 
-            ! absorbed wavepacket
-            do j = 1, Nx
-                psi_out_xR_tmp(:,j) = this%psi_out_x(:,j) * (1.0d0 - this%abs_R(:)) ! dissociative ionization
-                psi_out_x_tmp(:,j) = this%psi(:,j) * (1.d0 - this%abs_x(j))  ! ionization
-                this%psi_out_x(:,j) = this%psi_out_x(:,j) * this%abs_R(:)   ! cutting off the dissociated wavefunction
-    
-                !%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
-                !%% localization and dissociation 
-                !%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
-                psi_out_R_tmp(:,j) = this%psi(:,j)*(1.0d0 - this%abs_R(j)) ! dissociating localized wavefunction
+            ! absorbed wavepacket — ionization: extract before masking
+            call continuum_2d%ionization_extract(this%psi, A(k))
 
-                !%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
-                !%% Total cut off %%%%%%%%%%%%%%%%%%%%%%
-                !%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%  
-                this%psi(:,j) = this%psi(:,j) * this%abs_x(j) * this%abs_R(:)   
-            enddo
+            ! Propagate accumulated ionized wavefunction + write yield
+            call continuum_2d%ionization_propagate(A(k))
+            call continuum_2d%ionization_yield(ionization_yield)
+            write(this%ion_yield_2d_tk, '(2E20.10)') time(k) * au2fs, ionization_yield
+
+            ! localization and dissociation
+            do j = 1, Nx
+                psi_out_R_tmp(:,j) = this%psi(:,j) * (1.0d0 - this%abs_R(:)) ! dissociating wavefunction
+            end do
+
+            ! x- & R-absorber mask
+            do j = 1, Nx
+                this%psi(:,j) = this%psi(:,j) * this%abs_R(:) * this%abs_x(j)
+            end do
+            call integ_2D(this%psi, norm)
+            write(this%bound_norm_2d_tk,*) time(k) * au2fs, norm 
+
 
         end do timeloop
 
-        deallocate(psi_out_R_tmp, psi_out_x_tmp, psi_out_xR_tmp)
+        deallocate(psi_out_R_tmp)
         if (allocated(pot_kh)) deallocate(pot_kh)
         if (allocated(pot_kh_half)) deallocate(pot_kh_half)
         if (allocated(pot_kh_next)) deallocate(pot_kh_next)
+
+        ! Finalize continuum 2D propagator
+        call continuum_2d%finalize()
+        close(this%ion_yield_2d_tk)
         close(this%avgR_2d_tk)
         close(this%avgx_2d_tk)
         close(this%norm_2d_tk)
+        close(this%bound_norm_2d_tk)
         close(this%dens_R_tk)
         close(this%dens_x_tk)
         close(this%field_2d_tk)
