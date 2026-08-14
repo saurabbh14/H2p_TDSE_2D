@@ -59,6 +59,8 @@ module InputVars
     
     ! Absorber choice for propagation (mask or CAP)
     character(5):: absorber                ! "mask" | "CAP"
+    real(dp) :: cpmR = 12.0_dp             ! absorber position from the end of the R-grid (a.u.)
+    real(dp) :: cpmx = 15.0_dp             ! absorber position from the end of the x-grid (a.u.)
     
     ! FFTW parallelization flags read from input
     character(10):: prop_par_FFTW

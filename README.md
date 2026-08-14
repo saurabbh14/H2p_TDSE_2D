@@ -239,11 +239,18 @@ The input file is organized into **scalar sections** (`[section]`) and **array-o
 
 | Key | Type | Description |
 |-----|------|-------------|
-| `absorber` | string | `"mask"` or `"CAP"` |
 | `propagator` | string | `"split_operator"` or `"rk4"` |
 | `gauge` | string | `"length"` or `"velocity"` |
 | `total_trans_off` | int | Number of transitions to switch off |
 | `trans_off` | string | Space-separated transition pairs (e.g., `"12 23"`) |
+
+#### `[absorber]` — Absorbing Boundary Conditions
+
+| Key | Type | Description |
+|-----|------|-------------|
+| `kind` | string | `"mask"` or `"CAP"` |
+| `R_pos` | float | Absorber position measured from the end of the R-grid (a.u.) |
+| `x_pos` | float | Absorber position measured from the end of the x-grid (a.u.) |
 
 #### `[parallel]` — Parallelization
 

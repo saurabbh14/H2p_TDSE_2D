@@ -173,8 +173,7 @@ contains
 
     !> Sets up absorber function for boundary treatment
     subroutine absorber_gen(this)
-        use global_vars, only: NR, R, absorber
-        use pot_param, only: cpmR
+        use global_vars, only: NR, R, absorber, cpmR
         use varprecision, only: dp
         class(time_prop), intent(inout) :: this
         character(len=5):: divider
@@ -881,8 +880,7 @@ contains
 
     !> Generates complex absorber function for boundary
     subroutine complex_absorber_function(v_abs, f)
-        use global_vars, only: NR, dp, dt, R
-        use pot_param, only: cpmR
+        use global_vars, only: NR, dp, dt, R, cpmR
         
         integer i
         real(dp):: a, eps, V_abs(NR), n, R0, p
@@ -908,9 +906,9 @@ contains
 
     !> Generates mask absorber function (cosine)
     subroutine mask_function_cos(cof)
-        use global_vars, only:NR, R, dR, dp
+        use global_vars, only:NR, R, dR, dp, cpmR
         use data_au
-        use pot_param
+        use pot_param, only: R0, Rend
    
         integer :: J
         real(dp):: cof(NR)
@@ -929,9 +927,9 @@ contains
     !------------------------------------------------
     !> Generates mask absorber function (exponential)
     subroutine mask_function_ex(cof)
-        use global_vars, only:NR, R, dR, dp
+        use global_vars, only:NR, R, dR, dp, cpmR
         use data_au
-        use pot_param
+        use pot_param, only: R0, Rend
     
         integer :: J
         real(dp):: cof(NR),c

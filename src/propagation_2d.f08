@@ -222,8 +222,7 @@ contains
 
     !> Sets up absorber function for boundary treatment
     subroutine absorber_gen(this)
-        use global_vars, only: NR, R, Nx, x, absorber
-        use pot_param, only: cpmR, cpmx
+        use global_vars, only: NR, R, Nx, x, absorber, cpmR, cpmx
         use varprecision, only: dp
         class(time_prop_2d), intent(inout) :: this
         character(len=5):: divider

@@ -32,6 +32,8 @@ module PrintInputVars
         print*, "Transition Dipole switched off: ", total_trans_off
         print*
         print*, "Absorber function: ", absorber
+        print*, "Absorber position from end of R-grid: ", cpmR, "a.u."
+        print*, "Absorber position from end of x-grid: ", cpmx, "a.u."
         print*
         print*, "TDSE Initial State:"
         print*, "Mode: ", trim(initial_distribution)

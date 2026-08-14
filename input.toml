@@ -43,11 +43,15 @@ adb_pot          = "H2+_BO.dat"
 trans_dip_prefix = ""
 
 [methods]
-absorber        = "mask"           # "mask" or "CAP"
 propagator      = "split_operator" # "split_operator" or "rk4"
 gauge           = "length"         # "length" or "velocity"
 total_trans_off = 0
 trans_off       = ""
+
+[absorber]
+kind  = "mask"   # "mask" or "CAP"
+R_pos = 12.0     # absorber position from the end of the R-grid (a.u.)
+x_pos = 15.0     # absorber position from the end of the x-grid (a.u.)
 
 [snapshots]
 enabled = false       # whether to write 2D wavefunction density snapshots

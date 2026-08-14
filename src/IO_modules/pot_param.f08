@@ -4,8 +4,6 @@ module pot_param
     implicit none
     real(dp):: R0, x0     ! Grid-Parameter, start..
     real(dp)::Rend, xend   !..and end
-    real(dp),parameter:: cpmR= 12.0_dp !*2 !absorber position from the end of R-grid
-    real(dp),parameter:: cpmx= 15.0_dp !*2 !absorber position from the end of x-grid
 
     contains
         function morse_potential(de,a,re,r) result(pot)

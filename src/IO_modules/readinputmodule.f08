@@ -77,8 +77,6 @@ contains
         trans_dip_prefix = trim(buf)
 
         ! ----- methods -----
-        buf               = cfg%get_string("methods", "absorber",        "mask")
-        absorber          = trim(buf)
         buf               = cfg%get_string("methods", "propagator",      "split_operator")
         propagator_method = trim(buf)
         buf               = cfg%get_string("methods", "gauge",           "length")
@@ -86,6 +84,12 @@ contains
         total_trans_off   = cfg%get_int   ("methods", "total_trans_off", 0)
         buf               = cfg%get_string("methods", "trans_off",       "")
         trans_off         = trim(buf)
+
+        ! ----- absorber -----
+        buf               = cfg%get_string("absorber", "kind",  "mask")
+        absorber          = trim(buf)
+        cpmR              = cfg%get_real  ("absorber", "R_pos", 12.0_dp)
+        cpmx              = cfg%get_real  ("absorber", "x_pos", 15.0_dp)
 
         ! ----- snapshots -----
         buf               = cfg%get_string("snapshots", "enabled",     "false")
