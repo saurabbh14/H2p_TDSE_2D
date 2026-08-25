@@ -12,20 +12,30 @@ module pulse_mod
     public:: pulse_param
 
     !> Internal per-pulse data — one instance per laser
+    !> `tp` / `rise_time` hold the requested duration converted to a.u.;
+    !> `tp_eff` / `rise_eff` hold the duration actually used by the field
+    !> generator (they differ from the requested value only in "fs" mode,
+    !> where the sin2 width and the trapezoidal rise/fall are snapped up
+    !> to a whole number of optical cycles).
     type :: single_pulse_data
         character(150) :: envelope_shape = ""
+        character(20) :: time_unit = "fs"  ! unit of the input tp/rise_time: "fs" | "cycles"
         real(dp) :: lambda     = 0._dp     ! wavelength in a.u. after init
         real(dp) :: omega      = 0._dp     ! angular frequency in a.u.
-        real(dp) :: tp         = 0._dp     ! pulse duration in a.u.
+        real(dp) :: T_cycle    = 0._dp     ! optical period 2*pi/omega in a.u.
+        real(dp) :: tp         = 0._dp     ! requested pulse duration in a.u.
+        real(dp) :: tp_eff     = 0._dp     ! pulse duration actually used in a.u.
         real(dp) :: t_mid      = 0._dp     ! pulse midpoint in a.u.
         real(dp) :: alpha0     = 0._dp     ! quiver amplitude in a.u.
         real(dp) :: phi        = 0._dp     ! phase in rad
-        real(dp) :: rise_time  = 0._dp     ! rise time in a.u. (trapezoidal)
+        real(dp) :: rise_time  = 0._dp     ! requested rise time in a.u. (trapezoidal)
+        real(dp) :: rise_eff   = 0._dp     ! rise time actually used in a.u. (trapezoidal)
         real(dp) :: pulse_offset = 0._dp   ! internal offset (always 0 for now)
-        integer  :: cycles_rise  = 0       ! optical cycles during rise (trapezoidal)
-        integer  :: cycles_flat  = 0       ! optical cycles during flat-top (trapezoidal)
-        integer  :: cycles_fall  = 0       ! optical cycles during fall (trapezoidal)
-        integer  :: cycles_total = 0       ! total optical cycles
+        logical  :: skip       = .false.   ! .true. -> pulse contributes no field
+        real(dp) :: cycles_rise  = 0._dp   ! optical cycles during rise (trapezoidal)
+        real(dp) :: cycles_flat  = 0._dp   ! optical cycles during flat-top (trapezoidal)
+        real(dp) :: cycles_fall  = 0._dp   ! optical cycles during fall (trapezoidal)
+        real(dp) :: cycles_total = 0._dp   ! total optical cycles
         real(dp), allocatable :: alpha_t(:)   ! quiver field  alpha(t)
         real(dp), allocatable :: E_field(:)   ! electric field E(t)
         real(dp), allocatable :: A_field(:)   ! vector potential A(t)
@@ -55,6 +65,7 @@ contains
     !> Initialise internal pulse data from the LaserParams array read by
     !> the input module.  Replaces the old read_pulse_params (no file I/O).
     subroutine initialize_from_lasers(this, input_lasers, N_lasers)
+        use iso_fortran_env, only: output_unit
         class(pulse_param), intent(inout) :: this
         type(LaserParams), intent(in)     :: input_lasers(:)
         integer, intent(in)               :: N_lasers
@@ -66,6 +77,7 @@ contains
         do i = 1, N_lasers
             associate(pl => this%pulses(i), inp => input_lasers(i))
                 pl%envelope_shape = inp%envelope
+                pl%time_unit  = inp%time_unit
                 pl%lambda     = inp%lambda
                 pl%tp         = inp%tp
                 pl%t_mid      = inp%t_mid
@@ -79,26 +91,99 @@ contains
         ! Convert units and compute derived quantities
         do i = 1, N_lasers
             associate(pl => this%pulses(i))
-                pl%tp        = pl%tp        / au2fs
-                pl%t_mid     = pl%t_mid     / au2fs
-                pl%rise_time = pl%rise_time / au2fs
+                if (pl%lambda <= 0._dp) then
+                    print '(a,i0,a)', " ERROR: laser pulse #", i, ": lambda must be > 0 nm."
+                    flush(output_unit)
+                    error stop "pulse_mod: invalid wavelength"
+                end if
                 pl%omega     = (1._dp / (pl%lambda * 1.e-7_dp)) * cm2au
-                pl%phi       = pl%phi       * pi
-                ! Compute optical cycle counts
+                pl%T_cycle   = 2._dp * pi / pl%omega
+                pl%t_mid     = pl%t_mid / au2fs      ! t_mid is always given in fs
+                pl%phi       = pl%phi   * pi
+
+                ! tp and rise_time are given either in fs or in optical cycles
+                select case (trim(pl%time_unit))
+                case ("cycles")
+                    pl%tp        = pl%tp        * pl%T_cycle
+                    pl%rise_time = pl%rise_time * pl%T_cycle
+                case default    ! "fs"
+                    pl%tp        = pl%tp        / au2fs
+                    pl%rise_time = pl%rise_time / au2fs
+                end select
+
+                ! Durations actually used by the field generator.  In "fs" mode
+                ! the sin2 total width and the trapezoidal rise/fall are snapped
+                ! up to a whole number of optical cycles (historical behaviour);
+                ! in "cycles" mode the requested value is used exactly.
+                pl%tp_eff   = pl%tp
+                pl%rise_eff = pl%rise_time
+                if (trim(pl%time_unit) /= "cycles") then
+                    select case(trim(pl%envelope_shape))
+                    case("sin2")
+                        pl%tp_eff   = whole_cycles(pl%tp, pl%T_cycle) * pl%T_cycle
+                    case("trapezoidal")
+                        pl%rise_eff = whole_cycles(pl%rise_time, pl%T_cycle) * pl%T_cycle
+                    end select
+                end if
+
+                ! Reject (or silently skip) durations the envelopes cannot use
+                call validate_pulse(pl, i)
+
+                ! Optical cycle counts of the durations actually used
                 select case(trim(pl%envelope_shape))
                 case("trapezoidal")
-                    pl%cycles_rise = nint(pl%rise_time * pl%omega / (2._dp * pi))
-                    pl%cycles_flat = nint(pl%tp * pl%omega / (2._dp * pi))
-                    pl%cycles_fall = pl%cycles_rise
+                    pl%cycles_rise  = pl%rise_eff / pl%T_cycle
+                    pl%cycles_flat  = pl%tp_eff   / pl%T_cycle
+                    pl%cycles_fall  = pl%cycles_rise
                     pl%cycles_total = pl%cycles_rise + pl%cycles_flat + pl%cycles_fall
-                case("sin2")
-                    pl%cycles_total = nint(pl%tp * pl%omega / (2._dp * pi))
                 case default
-                    pl%cycles_total = nint(pl%tp * pl%omega / (2._dp * pi))
+                    pl%cycles_total = pl%tp_eff / pl%T_cycle
                 end select
             end associate
         end do
     end subroutine initialize_from_lasers
+
+    !> Number of whole optical cycles spanned by `t_dur` when durations are
+    !> given in fs.  Keeps the historical convention n = max(int(t/T)+1, 1),
+    !> i.e. a partially filled cycle is always rounded up.
+    pure function whole_cycles(t_dur, T_cycle) result(n)
+        real(dp), intent(in) :: t_dur, T_cycle
+        real(dp) :: n
+        n = real(max(int(t_dur / T_cycle) + 1, 1), dp)
+    end function whole_cycles
+
+    !> Check that the duration required by the chosen envelope is positive.
+    !> A non-positive duration is fatal for a pulse that carries field, but
+    !> is tolerated (pulse skipped) for a zero-amplitude placeholder pulse.
+    subroutine validate_pulse(pl, idx)
+        type(single_pulse_data), intent(inout) :: pl
+        integer, intent(in) :: idx
+
+        select case(trim(pl%envelope_shape))
+        case("cos2", "sin2", "gaussian")
+            if (pl%tp_eff <= 0._dp) call flag_bad_pulse(pl, idx, "tp")
+        case("trapezoidal")
+            if (pl%rise_eff <= 0._dp) call flag_bad_pulse(pl, idx, "rise_time")
+        end select
+    end subroutine validate_pulse
+
+    subroutine flag_bad_pulse(pl, idx, key)
+        use iso_fortran_env, only: output_unit
+        type(single_pulse_data), intent(inout) :: pl
+        integer, intent(in)      :: idx
+        character(*), intent(in) :: key
+
+        if (abs(pl%alpha0) <= tiny(1._dp)) then
+            print '(a,i0,a)', " WARNING: laser pulse #", idx, ": "//trim(key)// &
+                & " <= 0 and alpha0 = 0 — pulse skipped (no field)."
+            pl%skip = .true.
+        else
+            print '(a,i0,a)', " ERROR: laser pulse #", idx, ": "//trim(key)// &
+                & " must be > 0 for the '"//trim(pl%envelope_shape)//"' envelope."
+            flush(output_unit)
+            error stop "pulse_mod: invalid pulse duration"
+        end if
+    end subroutine flag_bad_pulse
 
     !> Print all pulse parameters.
     subroutine print_pulse_param(this)
@@ -115,22 +200,31 @@ contains
                 print*, "--- Laser #", i, "---"
                 print*, "  Envelope shape:  ", trim(pl%envelope_shape)
                 print*, "  Wavelength:      ", sngl(pl%lambda), "nm"
+                print*, "  Optical period:  ", sngl(pl%T_cycle * au2fs), "fs"
                 print*, "  Quiver amplitude:", sngl(pl%alpha0), "a.u."
                 print*, "  Field strength:  ", sngl(field_strength), "a.u."
                 print*, "  Intensity:       ", sngl(intensity), "W/cm2"
-                print*, "  Pulse width (tp):", sngl(pl%tp * au2fs), "fs"
+                print*, "  Duration unit:   ", trim(pl%time_unit)
+                print '(a,f10.4,a,f9.3,a)', "   Pulse width (tp):  ", pl%tp * au2fs, &
+                    & " fs = ", pl%tp / pl%T_cycle, " cycles  (as given)"
+                print '(a,f10.4,a,f9.3,a)', "   Pulse width used:  ", pl%tp_eff * au2fs, &
+                    & " fs = ", pl%tp_eff / pl%T_cycle, " cycles"
                 print*, "  Pulse midpoint:  ", sngl(pl%t_mid * au2fs), "fs"
                 print*, "  Phase (phi):     ", sngl(pl%phi / pi), "pi"
-                print*, "  Rise time:       ", sngl(pl%rise_time * au2fs), "fs"
                 if (trim(pl%envelope_shape) == "trapezoidal") then
+                    print '(a,f10.4,a,f9.3,a)', "   Rise time:         ", pl%rise_time * au2fs, &
+                        & " fs = ", pl%rise_time / pl%T_cycle, " cycles  (as given)"
+                    print '(a,f10.4,a,f9.3,a)', "   Rise time used:    ", pl%rise_eff * au2fs, &
+                        & " fs = ", pl%rise_eff / pl%T_cycle, " cycles"
                     print*, "  Optical cycles:"
-                    print*, "    - Rise:  ", pl%cycles_rise
-                    print*, "    - Flat:  ", pl%cycles_flat
-                    print*, "    - Fall:  ", pl%cycles_fall
-                    print*, "    - Total: ", pl%cycles_total
+                    print '(a,f9.3)', "     - Rise:  ", pl%cycles_rise
+                    print '(a,f9.3)', "     - Flat:  ", pl%cycles_flat
+                    print '(a,f9.3)', "     - Fall:  ", pl%cycles_fall
+                    print '(a,f9.3)', "     - Total: ", pl%cycles_total
                 else
-                    print*, "  Total optical cycles:", pl%cycles_total
+                    print '(a,f9.3)', "   Total optical cycles: ", pl%cycles_total
                 end if
+                if (pl%skip) print*, "  NOTE: this pulse is skipped — it contributes no field."
             end associate
         end do
         print*, "------------------------------------------------------"
@@ -141,8 +235,7 @@ contains
     subroutine generate_pulse(this)
         use differentiation, only: central_diff_on_grid
         class(pulse_param), intent(inout) :: this
-        integer :: i, k, n_cycles
-        real(dp) :: ttime, TU_eff, tp_eff
+        integer :: i
 
         print*
         print*, "Pulse generation..."
@@ -187,16 +280,21 @@ contains
         use differentiation, only: central_diff_on_grid
         type(single_pulse_data), intent(inout) :: pl
         integer, intent(in) :: idx
-        integer :: k, n_cycles
-        real(dp) :: ttime, TU_eff, tp_eff
+        integer :: k
+        real(dp) :: ttime
         character(20) :: label
 
         write(label, '(A,I0)') 'Laser', idx
 
+        if (pl%skip) then
+            print*, trim(label) // ": skipped (no field)."
+            return
+        end if
+
         select case(trim(pl%envelope_shape))
         case("cos2")
             do k = 1, Nt
-                pl%env(k)    = cos2(time(k), pl%tp, pl%t_mid, pl%pulse_offset)
+                pl%env(k)    = cos2(time(k), pl%tp_eff, pl%t_mid, pl%pulse_offset)
                 pl%alpha_t(k) = pl%alpha0 * pl%env(k) &
                     & * cos(pl%omega * (time(k) - pl%t_mid - pl%pulse_offset) + pl%phi)
             end do
@@ -205,52 +303,41 @@ contains
             pl%E_field = -pl%E_field
 
         case("sin2")
-            n_cycles = int(pl%tp * pl%omega / (2._dp * pi)) + 1
-            n_cycles = max(n_cycles, 1)
-            tp_eff = 2._dp * pi * real(n_cycles, dp) / pl%omega
-            pl%cycles_total = n_cycles
             do k = 1, Nt
-                pl%env(k)    = sin2(time(k), tp_eff, pl%t_mid, pl%pulse_offset)
+                pl%env(k)    = sin2(time(k), pl%tp_eff, pl%t_mid, pl%pulse_offset)
                 pl%alpha_t(k) = pl%alpha0 * pl%env(k) &
-                    & * sin(pl%omega * (time(k) - pl%t_mid - pl%pulse_offset - tp_eff/2) + pl%phi)
-                pl%A_field(k) = sin2_vector_pulse(time(k), tp_eff, pl%t_mid, pl%alpha0, &
+                    & * sin(pl%omega * (time(k) - pl%t_mid - pl%pulse_offset - pl%tp_eff/2) + pl%phi)
+                pl%A_field(k) = sin2_vector_pulse(time(k), pl%tp_eff, pl%t_mid, pl%alpha0, &
                     & pl%omega, pl%phi, pl%pulse_offset)
-                pl%E_field(k) = sin2_electric_pulse(time(k), tp_eff, pl%t_mid, pl%alpha0, &
+                pl%E_field(k) = sin2_electric_pulse(time(k), pl%tp_eff, pl%t_mid, pl%alpha0, &
                     & pl%omega, pl%phi, pl%pulse_offset)
             end do
 
         case("gaussian")
             do k = 1, Nt
-                pl%env(k)    = gaussian(time(k), pl%tp, pl%t_mid)
+                pl%env(k)    = gaussian(time(k), pl%tp_eff, pl%t_mid)
                 pl%alpha_t(k) = pl%alpha0 * pl%env(k) &
                     & * cos(pl%omega * (time(k) - pl%t_mid - pl%pulse_offset) + pl%phi)
-                pl%A_field(k) = gaussian_vector_pulse(time(k), pl%tp, pl%t_mid, pl%alpha0, &
+                pl%A_field(k) = gaussian_vector_pulse(time(k), pl%tp_eff, pl%t_mid, pl%alpha0, &
                     & pl%omega, pl%phi, pl%pulse_offset)
-                pl%E_field(k) = gaussian_electric_pulse(time(k), pl%tp, pl%t_mid, pl%alpha0, &
+                pl%E_field(k) = gaussian_electric_pulse(time(k), pl%tp_eff, pl%t_mid, pl%alpha0, &
                     & pl%omega, pl%phi, pl%pulse_offset)
             end do
 
         case("trapezoidal")
-            n_cycles = int(pl%rise_time * pl%omega / (2._dp * pi)) + 1
-            n_cycles = max(n_cycles, 1)
-            TU_eff = 2._dp * pi * real(n_cycles, dp) / pl%omega
-            pl%cycles_rise = n_cycles
-            pl%cycles_flat = nint(pl%tp * pl%omega / (2._dp * pi))
-            pl%cycles_fall = n_cycles
-            pl%cycles_total = pl%cycles_rise + pl%cycles_flat + pl%cycles_fall
             print*, trim(label) // " trapezoidal boundary times (fs):"
-            print'(a,f10.4)', "  Pulse start: ", (pl%t_mid - pl%tp/2 - TU_eff + pl%pulse_offset)*au2fs
-            print'(a,f10.4)', "  Rise end:    ", (pl%t_mid - pl%tp/2 + pl%pulse_offset)*au2fs
-            print'(a,f10.4)', "  Flat end:    ", (pl%t_mid + pl%tp/2 + pl%pulse_offset)*au2fs
-            print'(a,f10.4)', "  Pulse end:   ", (pl%t_mid + pl%tp/2 + TU_eff + pl%pulse_offset)*au2fs
+            print'(a,f10.4)', "  Pulse start: ", (pl%t_mid - pl%tp_eff/2 - pl%rise_eff + pl%pulse_offset)*au2fs
+            print'(a,f10.4)', "  Rise end:    ", (pl%t_mid - pl%tp_eff/2 + pl%pulse_offset)*au2fs
+            print'(a,f10.4)', "  Flat end:    ", (pl%t_mid + pl%tp_eff/2 + pl%pulse_offset)*au2fs
+            print'(a,f10.4)', "  Pulse end:   ", (pl%t_mid + pl%tp_eff/2 + pl%rise_eff + pl%pulse_offset)*au2fs
             do k = 1, Nt
                 ttime = time(k) - pl%t_mid - pl%pulse_offset
-                pl%env(k)    = trapezoidal(time(k), pl%tp, pl%t_mid, TU_eff, pl%pulse_offset)
+                pl%env(k)    = trapezoidal(time(k), pl%tp_eff, pl%t_mid, pl%rise_eff, pl%pulse_offset)
                 pl%alpha_t(k) = pl%alpha0 * pl%env(k) * cos(pl%omega * ttime + pl%phi)
                 pl%A_field(k) = trapezoidal_vector_pulse(time(k), pl%omega, pl%phi, &
-                    & pl%alpha0, pl%tp, pl%t_mid, pl%pulse_offset, TU_eff)
+                    & pl%alpha0, pl%tp_eff, pl%t_mid, pl%pulse_offset, pl%rise_eff)
                 pl%E_field(k) = trapezoidal_electric_pulse(time(k), pl%omega, pl%phi, &
-                    & pl%alpha0, pl%tp, pl%t_mid, pl%pulse_offset, TU_eff)
+                    & pl%alpha0, pl%tp_eff, pl%t_mid, pl%pulse_offset, pl%rise_eff)
             end do
         case default
             print*, trim(label) // ": Default pulse shape is CW."

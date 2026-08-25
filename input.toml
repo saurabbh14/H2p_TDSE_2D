@@ -74,20 +74,33 @@ itp_fftw      = ""           # "parallel" or ""
 omp_nthreads  = 0            # 0 = use all available threads
 
 # Laser pulses — add as many [[laser.pulses]] blocks as needed
+#
+# [laser] time_unit sets the default unit of the pulse durations `tp` and
+# `rise_time` for every pulse; each [[laser.pulses]] block may override it.
+#   "fs"     -> femtoseconds (default).  Note: in this mode the sin2 total
+#               width and the trapezoidal rise/fall are rounded up to the
+#               next whole optical cycle (printed as "…used" at startup).
+#   "cycles" -> optical cycles of the pulse carrier; used exactly as given.
+# `t_mid` is always in fs, independent of time_unit.
+[laser]
+time_unit = "fs"         # "fs" (default) | "cycles"
+
 [[laser.pulses]]
 envelope  = "sin2"       # "cos2" | "sin2" | "gaussian" | "trapezoidal"
 lambda    = 228.0        # wavelength in nm
-tp        = 8.0          # pulse duration in fs (FWHM for gaussian, total width for sin2/cos2, flat-top for trapezoidal)
-t_mid     = 10.0         # pulse midpoint in fs
+time_unit = "fs"         # unit of tp and rise_time: "fs" | "cycles"
+tp        = 8.0          # pulse duration (FWHM for gaussian, total width for sin2/cos2, flat-top for trapezoidal)
+t_mid     = 10.0         # pulse midpoint in fs (always fs)
 alpha0    = 2.5          # quiver amplitude in a.u.
 phi       = 0.0          # carrier-envelope phase in units of pi
-rise_time = 4.0          # rise/fall time in fs (only used for trapezoidal)
+rise_time = 4.0          # rise/fall time, same unit as tp (only used for trapezoidal)
 
 [[laser.pulses]]
 envelope  = "trapezoidal"
 lambda    = 800.0
-tp        = 0.0
-t_mid     = 0.0
+time_unit = "cycles"     # tp and rise_time below are in optical cycles
+tp        = 0.0          # flat-top width in optical cycles
+t_mid     = 0.0          # pulse midpoint in fs (always fs)
 alpha0    = 0.0
 phi       = 0.0
-rise_time = 0.0
+rise_time = 2.0          # rise/fall in optical cycles (must be > 0 for trapezoidal)

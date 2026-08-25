@@ -21,6 +21,7 @@ contains
         type(toml_error) :: err
         integer :: i
         character(2000) :: buf
+        character(20) :: default_time_unit
 
         call cfg%parse(this%path, err)
         if (err%flag) then
@@ -115,12 +116,21 @@ contains
         omp_nthreads  = cfg%get_int   ("parallel", "omp_nthreads", 0)
 
         ! ----- laser pulses (array-of-tables) -----
+        ! Unit of the pulse durations (tp, rise_time).  The optional
+        ! [laser] time_unit key sets the default for every pulse; each
+        ! [[laser.pulses]] block may override it with its own time_unit.
+        buf               = cfg%get_string("laser", "time_unit", "fs")
+        default_time_unit = normalise_time_unit(buf, "fs", 0)
+
         N_lasers = cfg%count_array("laser.pulses")
         if (N_lasers > 0) then
             allocate(lasers(N_lasers))
             do i = 1, N_lasers
                 buf              = cfg%get_array_string("laser.pulses", i, "envelope",  "sin2")
                 lasers(i)%envelope  = trim(buf)
+                buf                 = cfg%get_array_string("laser.pulses", i, "time_unit", &
+                    &                                      trim(default_time_unit))
+                lasers(i)%time_unit = normalise_time_unit(buf, trim(default_time_unit), i)
                 lasers(i)%lambda    = cfg%get_array_real  ("laser.pulses", i, "lambda",    800._dp)
                 lasers(i)%tp        = cfg%get_array_real  ("laser.pulses", i, "tp",          0._dp)
                 lasers(i)%t_mid     = cfg%get_array_real  ("laser.pulses", i, "t_mid",       0._dp)
@@ -135,5 +145,36 @@ contains
 
         call cfg%finalise()
     end subroutine read_input_file
+
+    !> Normalise a pulse-duration unit string to either "fs" or "cycles".
+    !> Accepted input:
+    !>   fs, femtosecond(s)                     -> "fs"
+    !>   cycle(s), oc, optical_cycle(s)         -> "cycles"
+    !> An empty string yields `fallback`; anything unrecognised yields
+    !> `fallback` together with a warning.  `idx` is the pulse index used
+    !> in the warning message (0 = the global [laser] default).
+    function normalise_time_unit(raw, fallback, idx) result(unit)
+        character(*), intent(in) :: raw, fallback
+        integer, intent(in)      :: idx
+        character(20)            :: unit
+
+        select case (raw)
+        case ("")
+            unit = fallback
+        case ("fs", "femtosecond", "femtoseconds")
+            unit = "fs"
+        case ("cycles", "cycle", "oc", "optical_cycle", "optical_cycles")
+            unit = "cycles"
+        case default
+            if (idx > 0) then
+                print '(a,i0,a)', " WARNING: unknown time_unit '"//trim(adjustl(raw)) &
+                    & //"' for laser pulse #", idx, " — using '"//trim(fallback)//"'."
+            else
+                print '(a)', " WARNING: unknown [laser] time_unit '"//trim(adjustl(raw)) &
+                    & //"' — using '"//trim(fallback)//"'."
+            end if
+            unit = fallback
+        end select
+    end function normalise_time_unit
 
 end module ReadInputFile

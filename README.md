@@ -268,11 +268,58 @@ Add one `[[laser.pulses]]` block per laser pulse. Any number of pulses is suppor
 |-----|------|------|-------------|
 | `envelope` | string | — | `"cos2"`, `"sin2"`, `"gaussian"`, or `"trapezoidal"` |
 | `lambda` | float | nm | Wavelength |
-| `tp` | float | fs | Pulse duration (FWHM for gaussian; total width for sin²/cos²; flat-top width for trapezoidal) |
-| `t_mid` | float | fs | Pulse midpoint time |
+| `time_unit` | string | — | Unit of `tp` **and** `rise_time`: `"fs"` (default) or `"cycles"` |
+| `tp` | float | `time_unit` | Pulse duration (FWHM for gaussian; total width for sin²/cos²; flat-top width for trapezoidal) |
+| `t_mid` | float | fs | Pulse midpoint time (**always fs**, independent of `time_unit`) |
 | `alpha0` | float | a.u. | Quiver amplitude |
 | `phi` | float | π | Carrier-envelope phase (0.0 to 2.0) |
-| `rise_time` | float | fs | Rise/fall time (trapezoidal only) |
+| `rise_time` | float | `time_unit` | Rise/fall time (trapezoidal only, must be > 0) |
+
+##### Pulse duration units
+
+`tp` and `rise_time` always share the same unit, selected by `time_unit`:
+
+* `"fs"` (default) — femtoseconds. In this mode the sin² total width and the
+  trapezoidal rise/fall are rounded **up** to the next whole optical cycle
+  (`n = int(t/T) + 1`), as in earlier versions of the code. The trapezoidal
+  flat-top `tp`, and the cos²/gaussian `tp`, are used exactly as given.
+* `"cycles"` — optical cycles of the pulse carrier (`T = λ/c`). The requested
+  duration is used exactly, without any rounding. Aliases: `"cycle"`, `"oc"`,
+  `"optical_cycle"`, `"optical_cycles"`. Unit names are case insensitive.
+
+An optional `[laser]` table sets the default unit for every pulse, which each
+`[[laser.pulses]]` block may override:
+
+```toml
+[laser]
+time_unit = "fs"          # default for all pulses
+
+[[laser.pulses]]
+envelope  = "sin2"
+lambda    = 228.0
+tp        = 8.0           # fs
+t_mid     = 10.0          # fs (always)
+alpha0    = 2.5
+phi       = 0.0
+
+[[laser.pulses]]
+envelope  = "trapezoidal"
+lambda    = 800.0
+time_unit = "cycles"      # this pulse is specified in optical cycles
+tp        = 5.0           # 5 cycles of flat top
+rise_time = 3.0           # 3 cycles of rise and of fall
+t_mid     = 20.0          # fs
+alpha0    = 1.0
+phi       = 0.0
+```
+
+At startup every pulse is reported both as given and as actually used, e.g.
+
+```
+  Duration unit:   fs
+  Pulse width (tp):      8.0000 fs =    10.600 cycles  (as given)
+  Pulse width used:      8.3020 fs =    11.000 cycles
+```
 
 ---
 

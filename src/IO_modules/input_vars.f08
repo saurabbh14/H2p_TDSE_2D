@@ -6,14 +6,19 @@ module InputVars
     implicit none
 
     !> Per-laser parameters — one instance per [[laser.pulses]] entry
+    !> `time_unit` selects the unit of BOTH `tp` and `rise_time`:
+    !>   "fs"     — femtoseconds (default)
+    !>   "cycles" — optical cycles of the pulse carrier (T = lambda/c)
+    !> `t_mid` is always given in fs (absolute time on the propagation grid).
     type :: LaserParams
         character(150) :: envelope = ""    ! "sin2" | "cos2" | "gaussian" | "trapezoidal"
+        character(20) :: time_unit = "fs"  ! unit of tp and rise_time: "fs" | "cycles"
         real(dp) :: lambda    = 0._dp      ! wavelength (nm)
-        real(dp) :: tp        = 0._dp      ! pulse duration (fs)
-        real(dp) :: t_mid     = 0._dp      ! pulse midpoint (fs)
+        real(dp) :: tp        = 0._dp      ! pulse duration (in units of time_unit)
+        real(dp) :: t_mid     = 0._dp      ! pulse midpoint (fs, always)
         real(dp) :: alpha0    = 0._dp      ! quiver amplitude (a.u.)
         real(dp) :: phi       = 0._dp      ! carrier-envelope phase (units of pi)
-        real(dp) :: rise_time = 0._dp      ! rise/fall time (fs) — trapezoidal only
+        real(dp) :: rise_time = 0._dp      ! rise/fall time (in units of time_unit) — trapezoidal only
     end type LaserParams
 
     ! R-grid

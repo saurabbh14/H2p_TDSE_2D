@@ -4,6 +4,55 @@ All notable changes to the TDSE-2D solver will be documented in this file.
 
 ---
 
+## [Unreleased]
+
+### Added
+- **Explicit unit selection for pulse durations** — new `time_unit` key for laser
+  pulses, accepting `"fs"` (default) or `"cycles"` (optical cycles of the pulse
+  carrier; aliases `cycle`, `oc`, `optical_cycle`, `optical_cycles`, case
+  insensitive). It applies to **both** `tp` and `rise_time`, so the two can no
+  longer be given in different units. `t_mid` remains in fs in all cases.
+  An optional `[laser]` table sets the default unit for all pulses, which any
+  `[[laser.pulses]]` block may override.
+- **Effective-duration reporting** — `pulse%param_print()` now prints the optical
+  period, the duration unit, and each duration both *as given* and *as actually
+  used*, in fs **and** in optical cycles (previously only the requested value was
+  printed, which hid the internal cycle rounding).
+- **Pulse sanity checks in `initialize`** — non-positive `tp` (cos²/sin²/gaussian)
+  or `rise_time` (trapezoidal) and non-positive `lambda` are now detected before
+  the (expensive) ITP stage: fatal for a pulse carrying field, and a skipped
+  pulse (with a warning) for a zero-amplitude placeholder pulse.
+
+### Changed
+- **Duration handling centralised in `initialize_from_lasers`** — the whole-cycle
+  rounding that used to be hidden inside `generate_single` is now applied once
+  during initialisation and stored in `tp_eff` / `rise_eff`, which the field
+  generator uses. Behaviour in `"fs"` mode is unchanged (`n = int(t/T) + 1`
+  whole cycles for the sin² width and the trapezoidal rise/fall); in `"cycles"`
+  mode the requested duration is used exactly, with no rounding.
+- **`single_pulse_data`** — added `time_unit`, `T_cycle`, `tp_eff`, `rise_eff`
+  and `skip`; the `cycles_rise/flat/fall/total` counters became `real(dp)` so
+  fractional cycle counts are reported honestly.
+- **`input_vars.f08`** — `LaserParams` gained `time_unit`; the `tp`/`rise_time`
+  comments now state the unit is selected by `time_unit`.
+- **`readinputmodule.f08`** — reads `[laser] time_unit` and the per-pulse
+  `time_unit`, normalises the spelling and warns (falling back to the default)
+  on an unknown unit.
+- **`input.toml` / `README.md`** — documented the unit modes; the second
+  (zero-amplitude) example pulse now demonstrates `time_unit = "cycles"`.
+
+### Fixed
+- **Misdocumented rise time** — `rise_time` was labelled "fs" in `input.toml`
+  while the code silently converted it to a whole number of optical cycles
+  (e.g. 4 fs at 228 nm became 6 cycles = 4.53 fs, and at 800 nm 2 cycles =
+  5.30 fs). The rounding is unchanged in `"fs"` mode but is now documented and
+  reported; `"cycles"` mode gives direct control over the cycle count.
+- **Division by zero for `rise_time = 0`** — a trapezoidal pulse with zero
+  rise time no longer relies on the accidental `max(n_cycles, 1)` floor; it is
+  reported and either skipped (zero amplitude) or rejected.
+
+---
+
 ## [0.2.0] — 2026-07-19
 
 ### Breaking Change
