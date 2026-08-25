@@ -54,6 +54,8 @@ A Fortran-based code for solving the time-dependent Schrödinger equation (TDSE)
 - Localized-state population analysis (gerade/ungerade)
 - Vibrational population analysis on each electronic surface
 - Kinetic Energy Release (KER) spectra
+- Continuum-channel yield analysis (ionization, dissociation,
+  dissociation-after-ionization, ionization-after-dissociation)
 - Momentum spectra for continuum/dissociated wavepackets
 - Absorbed wavepacket tracking and analysis
 - Electric field and vector potential time-histories
@@ -343,6 +345,10 @@ All output is written to the specified output directory, organized into subdirec
         ├── norm_2d.out          # Wavefunction norm vs. time
         ├── avgR_2d.out          # Expectation value ⟨R⟩(t)
         ├── avgx_2d.out          # Expectation value ⟨x⟩(t)
+        ├── ionization_yield_2d.out      # Ionization yield vs. time
+        ├── dissociation_yield_2d.out    # Pure dissociation yield vs. time
+        ├── diss_after_ion_yield_2d.out  # Dissociation-after-ionization yield
+        ├── ion_after_diss_yield_2d.out  # Ionization-after-dissociation yield
         ├── td-density_R.out     # Time-dependent R density map
         ├── td-density_x.out     # Time-dependent x density map
         └── field_2d.out         # Electric field & vector potential

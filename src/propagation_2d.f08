@@ -66,6 +66,7 @@ module propagation2d_mod
         integer :: abs_R_tk, abs_x_tk
         integer :: psi_outR_norm_2d_tk, psi_outR_Pdens_2d_tk
         integer :: ion_yield_2d_tk
+        integer :: diss_yield_2d_tk, diss_after_ion_yield_2d_tk, ion_after_diss_yield_2d_tk
         ! KH-frame output files (for KH_td mode)
         integer :: dens_x_kh_tk, dens_R_kh_tk
         integer :: avgx_kh_2d_tk, avgR_kh_2d_tk
@@ -357,6 +358,18 @@ contains
         ! time dependent ionization yield
         write(filepath, '(a,a)') adjustl(trim(time_prop_dir_2d)), "ionization_yield_2d.out"
         open(newunit=this%ion_yield_2d_tk,file=filepath,status='unknown')
+
+        ! time dependent dissociation yield
+        write(filepath, '(a,a)') adjustl(trim(time_prop_dir_2d)), "dissociation_yield_2d.out"
+        open(newunit=this%diss_yield_2d_tk,file=filepath,status='unknown')
+
+        ! time dependent dissociation-after-ionization yield
+        write(filepath, '(a,a)') adjustl(trim(time_prop_dir_2d)), "diss_after_ion_yield_2d.out"
+        open(newunit=this%diss_after_ion_yield_2d_tk,file=filepath,status='unknown')
+
+        ! time dependent ionization-after-dissociation yield
+        write(filepath, '(a,a)') adjustl(trim(time_prop_dir_2d)), "ion_after_diss_yield_2d.out"
+        open(newunit=this%ion_after_diss_yield_2d_tk,file=filepath,status='unknown')
         
         ! time dependent momentum density of absorbed wavepacket 
         write(filepath, '(a,a)') adjustl(trim(time_prop_dir_2d)), "psi_outR_momt_density_2d_pm3d.out"
@@ -397,6 +410,7 @@ contains
         integer :: max_num_threads
         real(dp) :: evR, evx, velx, accx, epx, epR
         real(dp) :: norm, ionization_yield
+        real(dp) :: dissociation_yield, diss_after_ion_yield, ion_after_diss_yield
         real(dp) :: E(Nt), A(Nt)
         real(dp) :: alpha_t(Nt)
         real(dp) :: E_half, A_half       ! fields at t + dt/2 for RK4
@@ -405,9 +419,6 @@ contains
         real(dp) :: E_zero, A_zero       ! zero fields for KH mode
         character(*), intent(in) :: propagator_method
         character(20) :: in_xR, out_x, out_R, out_xR
-        complex(dp), allocatable :: psi_out_R_tmp(:,:)
-
-        allocate(psi_out_R_tmp(NR,Nx))
 
         ! Initialize propagator based on selected method and gauge
         select case(trim(adjustl(propagator_method)))
@@ -431,9 +442,12 @@ contains
             end if
         end select
 
-        ! Initialize continuum 2D ionization propagator
+        ! Initialize continuum 2D propagators (ionization + dissociation channels)
         call continuum_2d%initialize(Nx - this%i_cpmx, NR - this%i_cpmR, this%abs_x, this%abs_R, gauge_2d)
         call continuum_2d%ionization_enable()
+        call continuum_2d%dissociation_enable()
+        call continuum_2d%diss_after_ion_enable()
+        call continuum_2d%ion_after_diss_enable()
 
         ! Initial wavefunction gauge transformation for velocity gauge
         if (trim(adjustl(gauge_2d)) == "velocity") then
@@ -627,18 +641,22 @@ contains
                     call wavefunction_density_snapshot(this%psi, time(k))
             end if
 
-            ! absorbed wavepacket — ionization: extract before masking
+            ! absorbed wavepackets — extract before masking
             call continuum_2d%ionization_extract(this%psi, A(k))
+            call continuum_2d%dissociation_extract(this%psi, A(k))
 
-            ! Propagate accumulated ionized wavefunction + write yield
-            call continuum_2d%ionization_propagate(A(k))
+            ! Propagate all accumulated continuum channels (incl. cross-channel flux)
+            call continuum_2d%propagate(A(k))
+
+            ! Write the channel yields
             call continuum_2d%ionization_yield(ionization_yield)
+            call continuum_2d%dissociation_yield(dissociation_yield)
+            call continuum_2d%diss_after_ion_yield(diss_after_ion_yield)
+            call continuum_2d%ion_after_diss_yield(ion_after_diss_yield)
             write(this%ion_yield_2d_tk, '(2E20.10)') time(k) * au2fs, ionization_yield
-
-            ! localization and dissociation
-            do j = 1, Nx
-                psi_out_R_tmp(:,j) = this%psi(:,j) * (1.0d0 - this%abs_R(:)) ! dissociating wavefunction
-            end do
+            write(this%diss_yield_2d_tk, '(2E20.10)') time(k) * au2fs, dissociation_yield
+            write(this%diss_after_ion_yield_2d_tk, '(2E20.10)') time(k) * au2fs, diss_after_ion_yield
+            write(this%ion_after_diss_yield_2d_tk, '(2E20.10)') time(k) * au2fs, ion_after_diss_yield
 
             ! x- & R-absorber mask
             do j = 1, Nx
@@ -650,7 +668,6 @@ contains
 
         end do timeloop
 
-        deallocate(psi_out_R_tmp)
         if (allocated(pot_kh)) deallocate(pot_kh)
         if (allocated(pot_kh_half)) deallocate(pot_kh_half)
         if (allocated(pot_kh_next)) deallocate(pot_kh_next)
@@ -658,6 +675,9 @@ contains
         ! Finalize continuum 2D propagator
         call continuum_2d%finalize()
         close(this%ion_yield_2d_tk)
+        close(this%diss_yield_2d_tk)
+        close(this%diss_after_ion_yield_2d_tk)
+        close(this%ion_after_diss_yield_2d_tk)
         close(this%avgR_2d_tk)
         close(this%avgx_2d_tk)
         close(this%norm_2d_tk)
