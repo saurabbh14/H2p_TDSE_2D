@@ -414,7 +414,9 @@ contains
         real(dp) :: E(Nt), A(Nt)
         real(dp) :: alpha_t(Nt)
         real(dp) :: E_half, A_half       ! fields at t + dt/2 for RK4
+        real(dp) :: E_next, A_next       ! fields at t + dt   for RK4
         real(dp) :: alpha_half           ! quiver disp at t + dt/2 for RK4-KH
+        real(dp) :: alpha_next           ! quiver disp at t + dt   for RK4-KH
         real(dp), allocatable :: pot_kh(:,:), pot_kh_half(:,:), pot_kh_next(:,:)
         real(dp) :: E_zero, A_zero       ! zero fields for KH mode
         character(*), intent(in) :: propagator_method
@@ -443,7 +445,9 @@ contains
         end select
 
         ! Initialize continuum 2D propagators (ionization + dissociation channels)
-        call continuum_2d%initialize(Nx - this%i_cpmx, NR - this%i_cpmR, this%abs_x, this%abs_R, gauge_2d)
+        ! The continuum channels follow the main propagator (split-operator / RK4).
+        call continuum_2d%initialize(Nx - this%i_cpmx, NR - this%i_cpmR, this%abs_x, this%abs_R, &
+            & gauge_2d, propagator_method)
         call continuum_2d%ionization_enable()
         call continuum_2d%dissociation_enable()
         call continuum_2d%diss_after_ion_enable()
@@ -499,6 +503,20 @@ contains
             epR = 0.d0
             epx = 0.d0
 
+            ! Fields at t + dt/2 and t + dt, shared by the main RK4 step and the
+            ! RK4 evolution of the continuum channels.
+            if (k < Nt) then
+                E_half = 0.5_dp * (E(k) + E(k+1))
+                A_half = 0.5_dp * (A(k) + A(k+1))
+                E_next = E(k+1)
+                A_next = A(k+1)
+            else
+                E_half = E(k)
+                A_half = A(k)
+                E_next = E(k)
+                A_next = A(k)
+            end if
+
             !====================================================================
             ! KH time-dependent mode: compute instantaneous KH potential
             !====================================================================
@@ -512,11 +530,13 @@ contains
                     call build_kh_potential_at_time(pot_kh, alpha_t(k))
                     if (k < Nt) then
                         alpha_half = 0.5_dp * (alpha_t(k) + alpha_t(k+1))
+                        alpha_next = alpha_t(k+1)
                     else
                         alpha_half = alpha_t(k)
+                        alpha_next = alpha_t(k)
                     end if
                     call build_kh_potential_at_time(pot_kh_half, alpha_half)
-                    call build_kh_potential_at_time(pot_kh_next, alpha_t(k+1))
+                    call build_kh_potential_at_time(pot_kh_next, alpha_next)
                     call rk4_operator_2d%rk4_step_kh(this%psi, dt, pot_kh, pot_kh_half, pot_kh_next)
                 case default
                     call build_kh_potential_at_time(pot_kh, alpha_t(k))
@@ -545,19 +565,10 @@ contains
                 !=============================================================
                 case("rk4")
                 !=============================================================
-                    ! Compute fields at halftime: E(t+dt/2), A(t+dt/2)
-                    ! and next step: E(t+dt), A(t+dt) for the k4 evaluation
-                    if (k < Nt) then
-                        E_half = 0.5_dp * (E(k) + E(k+1))
-                        A_half = 0.5_dp * (A(k) + A(k+1))
-                        call rk4_operator_2d%rk4_step(this%psi, dt, E(k), E_half, E(k+1), &
-                            & A(k), A_half, A(k+1), pot)
-                    else
-                        E_half = E(k)
-                        A_half = A(k)
-                        call rk4_operator_2d%rk4_step(this%psi, dt, E(k), E_half, E(k), &
-                            & A(k), A_half, A(k), pot)
-                    end if
+                    ! k1 uses E(t), A(t); k2/k3 use the half-step fields;
+                    ! k4 uses the next-step fields (all computed above).
+                    call rk4_operator_2d%rk4_step(this%psi, dt, E(k), E_half, E_next, &
+                        & A(k), A_half, A_next, pot)
 
                 !=============================================================
                 case default
@@ -646,7 +657,8 @@ contains
             call continuum_2d%dissociation_extract(this%psi, A(k))
 
             ! Propagate all accumulated continuum channels (incl. cross-channel flux)
-            call continuum_2d%propagate(A(k))
+            ! A_half / A_next are only used when the continuum runs in RK4 mode.
+            call continuum_2d%propagate(A(k), A_half, A_next)
 
             ! Write the channel yields
             call continuum_2d%ionization_yield(ionization_yield)

@@ -7,6 +7,18 @@ All notable changes to the TDSE-2D solver will be documented in this file.
 ## [Unreleased]
 
 ### Added
+- **RK4 evolution mode for the continuum channels** — the absorbed wave packets
+  are now integrated with the *same* scheme as the bound wave packet: setting
+  `[methods] propagator = "rk4"` switches the 2D ionization and dissociation
+  channels (`continuum_2d.f08`) and the 1D absorbed packet (`continuum_1d.f08`)
+  from the Strang split-operator to a 4-stage RK4 step, using the vector
+  potential at `t`, `t+dt/2` and `t+dt` exactly like `rk4_operator_2d%rk4_step`.
+  Each channel prints its evolution mode at start-up. The two doubly-continuum
+  channels (dissociation-after-ionization, ionization-after-dissociation) have a
+  purely diagonal Hamiltonian in `(PR,Px)`, so their analytic phase is exact and
+  is kept in both modes (documented in the code). Note that RK4 is not unitary:
+  the channel yields acquire an O(dt⁵)/step drift that the split-operator scheme
+  does not have, and each RK4 channel costs ~4 RHS evaluations per step.
 - **Explicit unit selection for pulse durations** — new `time_unit` key for laser
   pulses, accepting `"fs"` (default) or `"cycles"` (optical cycles of the pulse
   carrier; aliases `cycle`, `oc`, `optical_cycle`, `optical_cycles`, case
@@ -24,6 +36,16 @@ All notable changes to the TDSE-2D solver will be documented in this file.
   pulse (with a warning) for a zero-amplitude placeholder pulse.
 
 ### Changed
+- **Continuum API** — `continuum_2d%initialize` and `continuum_1d%initialize`
+  gained an *optional* trailing `propagator` argument (the main propagator name),
+  and `continuum_2d%propagate` gained optional `A_half` / `A_next` arguments
+  (used only in RK4 mode; they default to `A`). Existing call sites without the
+  new arguments keep the previous split-operator behaviour.
+- **`propagation_2d.f08`** — the half-step and next-step field values
+  (`E_half`, `A_half`, `E_next`, `A_next`) are now computed once at the top of the
+  time loop and shared by the main RK4 step and the continuum RK4 step, instead of
+  being recomputed inside the `case("rk4")` branch (numerically identical).
+- **Electron kinetic energy in the 2D main propagators** — see *Fixed*.
 - **Duration handling centralised in `initialize_from_lasers`** — the whole-cycle
   rounding that used to be hidden inside `generate_single` is now applied once
   during initialisation and stored in `tp_eff` / `rise_eff`, which the field
@@ -42,6 +64,21 @@ All notable changes to the TDSE-2D solver will be documented in this file.
   (zero-amplitude) example pulse now demonstrates `time_unit = "cycles"`.
 
 ### Fixed
+- **Electron mass in the 2D main propagators** — the electron kinetic term was
+  built with mass 1 (`0.5*px²`) in `split_operator_2d%kprop_gen_len/kprop_gen_vel`
+  and `rk4_operator_2d%kin_energy_gen/rhs_2d`, while the rest of the 2D code
+  (continuum channels, dipole velocity `⟨px⟩/m_eff`, dipole acceleration, the KH
+  displacement `kap/m_eff·α`, `setpot`) and the reference implementation
+  `check/prop2d.f90` all use the effective electron mass
+  `m_eff = (m1+m2)/(m1+m2+1)`. Both propagators now use `px²/(2*m_eff)`
+  (velocity gauge: `(px+kap*A)²/(2*m_eff)`). For H₂⁺ this shifts the electron
+  kinetic energy by ~0.03 %, so absolute phases differ slightly from earlier runs.
+  Note the electronic ITP in `adiabatic.f08` still uses mass 1, so the BO curves
+  are (as before) computed with a marginally different Hamiltonian.
+- **Out-of-bounds read in the time-dependent KH + RK4 branch** —
+  `build_kh_potential_at_time(pot_kh_next, alpha_t(k+1))` read `alpha_t(Nt+1)` on
+  the last time step; the next-step quiver displacement is now clamped to
+  `alpha_t(Nt)` (mirroring the existing `alpha_half` guard).
 - **Misdocumented rise time** — `rise_time` was labelled "fs" in `input.toml`
   while the code silently converted it to a whole number of optical cycles
   (e.g. 4 fs at 228 nm became 6 cycles = 4.53 fs, and at 800 nm 2 cycles =

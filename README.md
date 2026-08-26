@@ -23,6 +23,12 @@ A Fortran-based code for solving the time-dependent Schrödinger equation (TDSE)
 ### Propagation Methods
 - **Split-Operator** (Strang splitting) — 2nd-order symplectic integrator
 - **4th-order Runge-Kutta (RK4)** — Higher-order explicit integrator
+- The **continuum channels follow the main propagator**: with `propagator = "rk4"`
+  the absorbed wave packets are evolved with RK4 as well (2D ionization and
+  dissociation channels, 1D absorbed packet), so the bound and continuum parts
+  carry the same integrator error. Channels whose Hamiltonian is purely diagonal
+  in momentum space (dissociation-after-ionization and ionization-after-dissociation
+  in 2D) keep their exact analytic phase in both modes.
 
 ### Laser Pulse Models
 - **Envelope shapes**: cos², Gaussian, trapezoidal (with configurable rise time), and CW (continuous wave)
@@ -241,7 +247,7 @@ The input file is organized into **scalar sections** (`[section]`) and **array-o
 
 | Key | Type | Description |
 |-----|------|-------------|
-| `propagator` | string | `"split_operator"` or `"rk4"` |
+| `propagator` | string | `"split_operator"` or `"rk4"` — also selects the evolution scheme of the continuum channels |
 | `gauge` | string | `"length"` or `"velocity"` |
 | `total_trans_off` | int | Number of transitions to switch off |
 | `trans_off` | string | Space-separated transition pairs (e.g., `"12 23"`) |

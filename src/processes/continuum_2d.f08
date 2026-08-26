@@ -24,6 +24,16 @@ module continuum_2d_mod
         ! Coulomb half-step propagator at the x-absorber boundary
         complex(dp), allocatable :: vprop_coul_halfR(:)   ! exp(-i*0.5*dt*pot2D(:,Nx-ix_absorber))
         complex(dp), allocatable :: vprop_coul_halfL(:)   ! exp(-i*0.5*dt*pot2D(:,ix_absorber))
+        ! bare (non-exponentiated) boundary potentials — used by the RK4 right-hand side
+        real(dp), allocatable :: pot_bR(:)                ! pot(:, Nx - ix_absorber)
+        real(dp), allocatable :: pot_bL(:)                ! pot(:, ix_absorber)
+
+        ! time-evolution scheme: "split_operator" (default) or "rk4"
+        character(20) :: evol_mode = "split_operator"
+        ! RK4 scratch (allocated only when evol_mode == "rk4"); the RK4 stage
+        ! arrays themselves are local to the stepper to avoid argument aliasing.
+        real(dp), allocatable :: kin_R(:)                 ! (PR+lam*A)²/(2*m_red)
+        real(dp), allocatable :: kin_x(:)                 ! (Px+kap*A)²/(2*m_eff)
 
         ! gauge transform for x- (to velocity gauge)
         character(20) :: gauge ! Guage Type: "length" or "velocity" or "KH"
@@ -44,6 +54,8 @@ module continuum_2d_mod
         procedure :: set_enabled => ion_set_enabled
         procedure :: extract => ion_extract
         procedure :: accumulate => ion_accum
+        procedure :: rhs => ion_rhs
+        procedure :: rk4_step => ion_rk4_step
         procedure :: propagate => ion_propagate
         procedure :: yield => yield
         procedure :: finalize   => ion_finalize
@@ -69,6 +81,15 @@ module continuum_2d_mod
         complex(dp), allocatable :: kprop_R(:)     ! exp(-i*0.5*dt*(PR+lam*A)^2/m_red)
         ! Coulomb half-step propagator at the R-dissociation boundary (as function of x)
         complex(dp), allocatable :: vprop_coul_halfR(:)  ! exp(-i*0.5*dt*pot(iR_absorber,:))
+        ! bare (non-exponentiated) boundary potential — used by the RK4 right-hand side
+        real(dp), allocatable :: pot_bx(:)               ! pot(iR_absorber, :)
+
+        ! time-evolution scheme: "split_operator" (default) or "rk4"
+        character(20) :: evol_mode = "split_operator"
+        ! RK4 scratch (allocated only when evol_mode == "rk4"); the RK4 stage
+        ! arrays themselves are local to the stepper to avoid argument aliasing.
+        real(dp), allocatable :: kin_R(:)                ! (PR+lam*A)²/(2*m_red)
+        real(dp), allocatable :: kin_x(:)                ! (Px+kap*A)²/(2*m_eff)
 
         ! gauge transform (to velocity gauge)
         character(20) :: gauge
@@ -89,6 +110,8 @@ module continuum_2d_mod
         procedure :: set_enabled => diss_set_enabled
         procedure :: extract => diss_extract
         procedure :: accumulate => diss_accum
+        procedure :: rhs => diss_rhs
+        procedure :: rk4_step => diss_rk4_step
         procedure :: propagate => diss_propagate
         procedure :: yield => diss_yield
         procedure :: finalize => diss_finalize
@@ -153,8 +176,8 @@ contains
 
     !> Initialize FFTW plans, kinetic/Coulomb propagators, absorber phase,
     !! and allocate the accumulated ionized wavefunction array.
-    subroutine ion_init(this, ix_absorber, iR_absorber, abs_x, abs_R, gauge)
-        use global_vars, only: dt, m_eff, m_red, R, NR, Nx, pot, prop_par_FFTW
+    subroutine ion_init(this, ix_absorber, iR_absorber, abs_x, abs_R, gauge, propagator)
+        use global_vars, only: dt, NR, Nx, pot, prop_par_FFTW
         use data_au, only: im
         use FFTW3
         class(ionization_prop_type), intent(inout) :: this
@@ -163,8 +186,7 @@ contains
         complex(dp), intent(in) :: abs_x(Nx)      ! x-absorber mask
         complex(dp), intent(in) :: abs_R(NR)      ! R-absorber mask
         character(20), intent(in) :: gauge       ! Gauge Type: "length" or "velocity" or "KH"
-
-        integer :: i
+        character(*), intent(in), optional :: propagator ! "split_operator" | "rk4"
 
         this%NR = NR
         this%Nx = Nx
@@ -174,6 +196,13 @@ contains
         this%absorber_x = abs_x
         this%absorber_R = abs_R
         this%gauge = gauge
+
+        ! Time-evolution scheme: follow the main propagator; anything unknown
+        ! falls back to the split-operator scheme.
+        this%evol_mode = "split_operator"
+        if (present(propagator)) then
+            if (trim(adjustl(propagator)) == "rk4") this%evol_mode = "rk4"
+        end if
 
         print*
         print*, "Continuum 2D / Ionization: FFTW initialization ..."
@@ -209,6 +238,19 @@ contains
         allocate(this%vprop_coul_halfR(this%NR), this%vprop_coul_halfL(this%NR))
         this%vprop_coul_halfR(:) = exp(-im * 0.5_dp * dt * pot(:, Nx - ix_absorber))
         this%vprop_coul_halfL(:) = exp(-im * 0.5_dp * dt * pot(:, ix_absorber))
+
+        ! --- bare boundary potentials (RK4 needs V, not exp(-i*dt*V/2)) ---
+        allocate(this%pot_bR(this%NR), this%pot_bL(this%NR))
+        this%pot_bR(:) = pot(:, Nx - ix_absorber)
+        this%pot_bL(:) = pot(:, ix_absorber)
+
+        ! --- RK4 scratch (only needed in RK4 mode) ---
+        if (trim(adjustl(this%evol_mode)) == "rk4") then
+            allocate(this%kin_R(this%NR), this%kin_x(this%Nx))
+            print*, "Continuum 2D / Ionization: evolution mode = RK4"
+        else
+            print*, "Continuum 2D / Ionization: evolution mode = split-operator"
+        end if
 
         ! --- gauge transform for x- (to velocity gauge) ---
         allocate(this%gauge_transform(this%NR, this%Nx))
@@ -294,57 +336,153 @@ contains
         this%psi_out_new = (0._dp, 0._dp)
     end subroutine ion_accum
 
+    !> Evaluate the right-hand side of the TDSE for the accumulated ionized
+    !! wave packet in the mixed (R, Px) representation:
+    !!   psi_rhs = -i * H(A) * psi
+    !!   H(A) = (Px + kap*A)²/(2*m_eff)                          [diagonal in Px]
+    !!        + F_R⁻¹[ (PR + lam*A)²/(2*m_red) * F_R[psi] ]      [kinetic along R]
+    !!        + V_b(R; j)                                        [Coulomb at the x-absorber edge]
+    !! V_b is taken at the right (Nx - ix_absorber) or left (ix_absorber) x-boundary,
+    !! following the same column-side convention as the split-operator branch.
+    subroutine ion_rhs(this, psi, psi_rhs, A)
+        use global_vars, only: NR, Nx, m_eff, m_red, Px, PR, kap, lam
+        use data_au, only: im
+        use FFTW3
+        class(ionization_prop_type), intent(inout) :: this
+        complex(dp), intent(in)  :: psi(:,:)
+        complex(dp), intent(out) :: psi_rhs(:,:)
+        real(dp), intent(in) :: A
+
+        integer :: j
+
+        ! velocity-gauge (shifted-momentum) kinetic energies
+        this%kin_R(1:NR) = (PR(1:NR) + lam * A)**2 / (2._dp * m_red)
+        this%kin_x(1:Nx) = (Px(1:Nx) + kap * A)**2 / (2._dp * m_eff)
+
+        do j = 1, Nx
+            ! kinetic term along R: FFT R → PR, multiply, iFFT back (FFT pair → /NR)
+            this%psi1d_R_in(1:NR) = psi(1:NR, j)
+            call fftw_execute_dft(this%planFR, this%psi1d_R_in, this%psi1d_R_out)
+            this%psi1d_R_in(1:NR) = this%psi1d_R_out(1:NR) * this%kin_R(1:NR)
+            call fftw_execute_dft(this%planBR, this%psi1d_R_in, this%psi1d_R_out)
+            psi_rhs(1:NR, j) = this%psi1d_R_out(1:NR) / dble(NR)
+
+            ! diagonal terms: x-kinetic energy (in Px) + Coulomb at the absorber boundary
+            if (j > Nx/2) then
+                psi_rhs(1:NR, j) = psi_rhs(1:NR, j) &
+                    & + (this%kin_x(j) + this%pot_bR(1:NR)) * psi(1:NR, j)
+            else
+                psi_rhs(1:NR, j) = psi_rhs(1:NR, j) &
+                    & + (this%kin_x(j) + this%pot_bL(1:NR)) * psi(1:NR, j)
+            end if
+        end do
+
+        psi_rhs = -im * psi_rhs
+
+    end subroutine ion_rhs
+
+    !> One full RK4 step of the accumulated ionized wave packet:
+    !! psi -> psi + (k1 + 2*k2 + 2*k3 + k4) * dt/6, with the vector potential
+    !! sampled at t, t+dt/2 and t+dt (same stage convention as rk4_operator_2d).
+    !! The stage arrays are local (not components) so that no actual argument
+    !! aliases the passed-object dummy of ion_rhs.
+    subroutine ion_rk4_step(this, A_now, A_half, A_next)
+        use global_vars, only: NR, Nx, dt
+        class(ionization_prop_type), intent(inout) :: this
+        real(dp), intent(in) :: A_now, A_half, A_next
+
+        complex(dp), allocatable :: k1(:,:), k2(:,:), k3(:,:), k4(:,:)
+        complex(dp), allocatable :: psi_tmp(:,:)
+
+        allocate(k1(NR, Nx), k2(NR, Nx), k3(NR, Nx), k4(NR, Nx))
+        allocate(psi_tmp(NR, Nx))
+
+        ! k1 = rhs(psi, t)
+        call this%rhs(this%psi_out_acc, k1, A_now)
+        ! k2 = rhs(psi + k1*dt/2, t + dt/2)
+        psi_tmp = this%psi_out_acc + k1 * (0.5_dp * dt)
+        call this%rhs(psi_tmp, k2, A_half)
+        ! k3 = rhs(psi + k2*dt/2, t + dt/2)
+        psi_tmp = this%psi_out_acc + k2 * (0.5_dp * dt)
+        call this%rhs(psi_tmp, k3, A_half)
+        ! k4 = rhs(psi + k3*dt, t + dt)
+        psi_tmp = this%psi_out_acc + k3 * dt
+        call this%rhs(psi_tmp, k4, A_next)
+
+        this%psi_out_acc = this%psi_out_acc &
+            & + (k1 + 2._dp * k2 + 2._dp * k3 + k4) * (dt / 6._dp)
+
+        deallocate(k1, k2, k3, k4, psi_tmp)
+
+    end subroutine ion_rk4_step
+
     !> Propagate the accumulated ionized wavefunction in velocity gauge:
-    !! x-kinetic + Coulomb split-operator on R.
-    subroutine ion_propagate(this, A, flux_out)
+    !! x-kinetic + Coulomb, with the split-operator scheme or with RK4
+    !! (selected by evol_mode, i.e. by the main propagator).
+    !! A_half / A_next are only used in RK4 mode; when absent they default to A.
+    subroutine ion_propagate(this, A, A_half, A_next, flux_out)
         use global_vars, only: NR, Nx, dt, m_eff, m_red, Px, PR, kap, lam
         use data_au, only: im
         use FFTW3
         class(ionization_prop_type), intent(inout) :: this
         real(dp), intent(in) :: A
+        real(dp), intent(in), optional :: A_half, A_next
         complex(dp), intent(out), optional :: flux_out(:,:)
 
         integer :: j
         real(dp) :: sqrt_NR
+        real(dp) :: Ah, An
 
         if (.not. this%enabled) then
             if (present(flux_out)) flux_out = (0._dp, 0._dp)
             return
         end if
 
-        ! velocity gauge kinetic propagators
-        this%kprop_x = exp(-im * 0.5_dp * dt * (Px + kap * A) * (Px + kap * A) / m_eff) 
-        this%kprop_R = exp(-im * 0.5_dp * dt * (PR + lam * A) * (PR + lam * A) / m_red)
+        Ah = A
+        An = A
+        if (present(A_half)) Ah = A_half
+        if (present(A_next)) An = A_next
 
         sqrt_NR = sqrt(dble(NR))
 
-        ! 2. Split-operator on R coordinate (per Px column)
-        do j = 1, Nx
-            ! half-step Coulomb
-            if (j > Nx/2) then
-                this%psi1d_R_in(1:NR) = this%psi_out_acc(1:NR, j) &
-                    & * this%vprop_coul_halfR(1:NR)
-            else
-                this%psi1d_R_in(1:NR) = this%psi_out_acc(1:NR, j) &
-                    & * this%vprop_coul_halfL(1:NR)
-            end if
-            ! FFT R → PR
-            call fftw_execute_dft(this%planFR, this%psi1d_R_in, this%psi1d_R_out)
-            ! apply kinetic + normalize forward FFT
-            this%psi1d_R_in(1:NR) = this%psi1d_R_out(1:NR) * this%kprop_x(j) &
-                & * this%kprop_R(1:NR) / sqrt_NR
-            ! iFFT PR → R
-            call fftw_execute_dft(this%planBR, this%psi1d_R_in, this%psi1d_R_out)
-            this%psi1d_R_in(1:NR) = this%psi1d_R_out(1:NR) / sqrt_NR
-            ! half-step Coulomb
-            if (j > Nx/2) then
-                this%psi_out_acc(1:NR, j)= this%psi1d_R_in(1:NR) *  &
-                    & this%vprop_coul_halfR(1:NR)
-            else
-                this%psi_out_acc(1:NR, j)= this%psi1d_R_in(1:NR) *  &
-                    & this%vprop_coul_halfL(1:NR)
-            end if
-        end do
+        select case (trim(adjustl(this%evol_mode)))
+        case ("rk4")
+            ! 1. RK4 evolution with the same Hamiltonian as the split-operator branch
+            call this%rk4_step(A, Ah, An)
+
+        case default
+            ! velocity gauge kinetic propagators
+            this%kprop_x = exp(-im * 0.5_dp * dt * (Px + kap * A) * (Px + kap * A) / m_eff) 
+            this%kprop_R = exp(-im * 0.5_dp * dt * (PR + lam * A) * (PR + lam * A) / m_red)
+
+            ! 2. Split-operator on R coordinate (per Px column)
+            do j = 1, Nx
+                ! half-step Coulomb
+                if (j > Nx/2) then
+                    this%psi1d_R_in(1:NR) = this%psi_out_acc(1:NR, j) &
+                        & * this%vprop_coul_halfR(1:NR)
+                else
+                    this%psi1d_R_in(1:NR) = this%psi_out_acc(1:NR, j) &
+                        & * this%vprop_coul_halfL(1:NR)
+                end if
+                ! FFT R → PR
+                call fftw_execute_dft(this%planFR, this%psi1d_R_in, this%psi1d_R_out)
+                ! apply kinetic + normalize forward FFT
+                this%psi1d_R_in(1:NR) = this%psi1d_R_out(1:NR) * this%kprop_x(j) &
+                    & * this%kprop_R(1:NR) / sqrt_NR
+                ! iFFT PR → R
+                call fftw_execute_dft(this%planBR, this%psi1d_R_in, this%psi1d_R_out)
+                this%psi1d_R_in(1:NR) = this%psi1d_R_out(1:NR) / sqrt_NR
+                ! half-step Coulomb
+                if (j > Nx/2) then
+                    this%psi_out_acc(1:NR, j)= this%psi1d_R_in(1:NR) *  &
+                        & this%vprop_coul_halfR(1:NR)
+                else
+                    this%psi_out_acc(1:NR, j)= this%psi1d_R_in(1:NR) *  &
+                        & this%vprop_coul_halfL(1:NR)
+                end if
+            end do
+        end select
 
         ! Harvest the large-R flux (dissociation-after-ionization) BEFORE applying abs_R
         if (present(flux_out)) then
@@ -401,6 +539,10 @@ contains
         if (allocated(this%kprop_R))         deallocate(this%kprop_R)
         if (allocated(this%vprop_coul_halfL)) deallocate(this%vprop_coul_halfL)
         if (allocated(this%vprop_coul_halfR)) deallocate(this%vprop_coul_halfR)
+        if (allocated(this%pot_bR))          deallocate(this%pot_bR)
+        if (allocated(this%pot_bL))          deallocate(this%pot_bL)
+        if (allocated(this%kin_R))           deallocate(this%kin_R)
+        if (allocated(this%kin_x))           deallocate(this%kin_x)
         if (allocated(this%psi_out_acc))     deallocate(this%psi_out_acc)
         if (allocated(this%psi_out_new))     deallocate(this%psi_out_new)
 
@@ -413,7 +555,7 @@ contains
     !===========================================================================
 
     !> Initialize FFTW plans, kinetic/Coulomb propagators and allocate arrays.
-    subroutine diss_init(this, ix_absorber, iR_absorber, abs_x, abs_R, gauge)
+    subroutine diss_init(this, ix_absorber, iR_absorber, abs_x, abs_R, gauge, propagator)
         use global_vars, only: dt, NR, Nx, pot, prop_par_FFTW
         use data_au, only: im
         use FFTW3
@@ -421,6 +563,7 @@ contains
         integer, intent(in) :: ix_absorber, iR_absorber
         complex(dp), intent(in) :: abs_x(Nx), abs_R(NR)
         character(*), intent(in) :: gauge
+        character(*), intent(in), optional :: propagator ! "split_operator" | "rk4"
 
         this%NR = NR
         this%Nx = Nx
@@ -430,6 +573,13 @@ contains
         allocate(this%absorber_x(Nx), this%absorber_R(NR))
         this%absorber_x = abs_x
         this%absorber_R = abs_R
+
+        ! Time-evolution scheme: follow the main propagator; anything unknown
+        ! falls back to the split-operator scheme.
+        this%evol_mode = "split_operator"
+        if (present(propagator)) then
+            if (trim(adjustl(propagator)) == "rk4") this%evol_mode = "rk4"
+        end if
 
         print*
         print*, "Continuum 2D / Dissociation: FFTW initialization ..."
@@ -457,6 +607,18 @@ contains
         ! Coulomb half-step in x at the R-dissociation boundary (electron-nuclear)
         allocate(this%vprop_coul_halfR(this%Nx))
         this%vprop_coul_halfR(:) = exp(-im * 0.5_dp * dt * pot(iR_absorber, :))
+
+        ! bare boundary potential (RK4 needs V, not exp(-i*dt*V/2))
+        allocate(this%pot_bx(this%Nx))
+        this%pot_bx(:) = pot(iR_absorber, :)
+
+        ! RK4 scratch (only needed in RK4 mode)
+        if (trim(adjustl(this%evol_mode)) == "rk4") then
+            allocate(this%kin_R(this%NR), this%kin_x(this%Nx))
+            print*, "Continuum 2D / Dissociation: evolution mode = RK4"
+        else
+            print*, "Continuum 2D / Dissociation: evolution mode = split-operator"
+        end if
 
         allocate(this%gauge_transform(this%NR, this%Nx))
         this%gauge_transform = (1._dp, 0._dp)
@@ -530,47 +692,134 @@ contains
         this%psi_out_acc = this%psi_out_acc + this%psi_out_new
     end subroutine diss_accum
 
+    !> Evaluate the right-hand side of the TDSE for the accumulated dissociated
+    !! wave packet in the mixed (PR, x) representation:
+    !!   psi_rhs = -i * H(A) * psi
+    !!   H(A) = (PR + lam*A)²/(2*m_red)                          [diagonal in PR]
+    !!        + F_x⁻¹[ (Px + kap*A)²/(2*m_eff) * F_x[psi] ]      [kinetic along x]
+    !!        + pot(iR_absorber, x)                              [electron-nuclear Coulomb]
+    subroutine diss_rhs(this, psi, psi_rhs, A)
+        use global_vars, only: NR, Nx, m_eff, m_red, Px, PR, kap, lam
+        use data_au, only: im
+        use FFTW3
+        class(dissociation_prop_type), intent(inout) :: this
+        complex(dp), intent(in)  :: psi(:,:)
+        complex(dp), intent(out) :: psi_rhs(:,:)
+        real(dp), intent(in) :: A
+
+        integer :: i
+
+        ! velocity-gauge (shifted-momentum) kinetic energies
+        this%kin_R(1:NR) = (PR(1:NR) + lam * A)**2 / (2._dp * m_red)
+        this%kin_x(1:Nx) = (Px(1:Nx) + kap * A)**2 / (2._dp * m_eff)
+
+        do i = 1, NR
+            ! kinetic term along x: FFT x → Px, multiply, iFFT back (FFT pair → /Nx)
+            this%psi1d_x_in(1:Nx) = psi(i, 1:Nx)
+            call fftw_execute_dft(this%planFx, this%psi1d_x_in, this%psi1d_x_out)
+            this%psi1d_x_in(1:Nx) = this%psi1d_x_out(1:Nx) * this%kin_x(1:Nx)
+            call fftw_execute_dft(this%planBx, this%psi1d_x_in, this%psi1d_x_out)
+            psi_rhs(i, 1:Nx) = this%psi1d_x_out(1:Nx) / dble(Nx)
+
+            ! diagonal terms: R-kinetic energy (in PR) + Coulomb at the R-absorber boundary
+            psi_rhs(i, 1:Nx) = psi_rhs(i, 1:Nx) &
+                & + (this%kin_R(i) + this%pot_bx(1:Nx)) * psi(i, 1:Nx)
+        end do
+
+        psi_rhs = -im * psi_rhs
+
+    end subroutine diss_rhs
+
+    !> One full RK4 step of the accumulated dissociated wave packet.
+    !! The stage arrays are local (not components) so that no actual argument
+    !! aliases the passed-object dummy of diss_rhs.
+    subroutine diss_rk4_step(this, A_now, A_half, A_next)
+        use global_vars, only: NR, Nx, dt
+        class(dissociation_prop_type), intent(inout) :: this
+        real(dp), intent(in) :: A_now, A_half, A_next
+
+        complex(dp), allocatable :: k1(:,:), k2(:,:), k3(:,:), k4(:,:)
+        complex(dp), allocatable :: psi_tmp(:,:)
+
+        allocate(k1(NR, Nx), k2(NR, Nx), k3(NR, Nx), k4(NR, Nx))
+        allocate(psi_tmp(NR, Nx))
+
+        ! k1 = rhs(psi, t)
+        call this%rhs(this%psi_out_acc, k1, A_now)
+        ! k2 = rhs(psi + k1*dt/2, t + dt/2)
+        psi_tmp = this%psi_out_acc + k1 * (0.5_dp * dt)
+        call this%rhs(psi_tmp, k2, A_half)
+        ! k3 = rhs(psi + k2*dt/2, t + dt/2)
+        psi_tmp = this%psi_out_acc + k2 * (0.5_dp * dt)
+        call this%rhs(psi_tmp, k3, A_half)
+        ! k4 = rhs(psi + k3*dt, t + dt)
+        psi_tmp = this%psi_out_acc + k3 * dt
+        call this%rhs(psi_tmp, k4, A_next)
+
+        this%psi_out_acc = this%psi_out_acc &
+            & + (k1 + 2._dp * k2 + 2._dp * k3 + k4) * (dt / 6._dp)
+
+        deallocate(k1, k2, k3, k4, psi_tmp)
+
+    end subroutine diss_rk4_step
+
     !> Propagate the accumulated dissociated wavefunction in velocity gauge:
-    !! R-kinetic + electron-nuclear Coulomb split-operator on x.
+    !! R-kinetic + electron-nuclear Coulomb, with the split-operator scheme or
+    !! with RK4 (selected by evol_mode, i.e. by the main propagator).
     !! Optionally harvests the large-|x| flux (ionization-after-dissociation)
     !! into flux_out, already transformed to (PR,Px).
-    subroutine diss_propagate(this, A, flux_out)
+    !! A_half / A_next are only used in RK4 mode; when absent they default to A.
+    subroutine diss_propagate(this, A, A_half, A_next, flux_out)
         use global_vars, only: NR, Nx, dt, m_eff, m_red, Px, PR, kap, lam
         use data_au, only: im
         use FFTW3
         class(dissociation_prop_type), intent(inout) :: this
         real(dp), intent(in) :: A
+        real(dp), intent(in), optional :: A_half, A_next
         complex(dp), intent(out), optional :: flux_out(:,:)
 
         integer :: i
         real(dp) :: sqrt_Nx
+        real(dp) :: Ah, An
 
         if (.not. this%enabled) then
             if (present(flux_out)) flux_out = (0._dp, 0._dp)
             return
         end if
 
-        ! velocity gauge kinetic propagators
-        this%kprop_x = exp(-im * 0.5_dp * dt * (Px + kap * A)**2 / m_eff)
-        this%kprop_R = exp(-im * 0.5_dp * dt * (PR + lam * A)**2 / m_red)
+        Ah = A
+        An = A
+        if (present(A_half)) Ah = A_half
+        if (present(A_next)) An = A_next
 
         sqrt_Nx = sqrt(dble(Nx))
 
-        ! Split-operator on x coordinate (per PR row)
-        do i = 1, NR
-            ! half-step Coulomb
-            this%psi1d_x_in(1:Nx) = this%psi_out_acc(i, 1:Nx) * this%vprop_coul_halfR(1:Nx)
-            ! FFT x -> Px
-            call fftw_execute_dft(this%planFx, this%psi1d_x_in, this%psi1d_x_out)
-            ! apply kinetic + normalize forward FFT
-            this%psi1d_x_in(1:Nx) = this%psi1d_x_out(1:Nx) * this%kprop_R(i) &
-                & * this%kprop_x(1:Nx) / sqrt_Nx
-            ! iFFT Px -> x
-            call fftw_execute_dft(this%planBx, this%psi1d_x_in, this%psi1d_x_out)
-            this%psi1d_x_in(1:Nx) = this%psi1d_x_out(1:Nx) / sqrt_Nx
-            ! half-step Coulomb
-            this%psi_out_acc(i, 1:Nx) = this%psi1d_x_in(1:Nx) * this%vprop_coul_halfR(1:Nx)
-        end do
+        select case (trim(adjustl(this%evol_mode)))
+        case ("rk4")
+            ! RK4 evolution with the same Hamiltonian as the split-operator branch
+            call this%rk4_step(A, Ah, An)
+
+        case default
+            ! velocity gauge kinetic propagators
+            this%kprop_x = exp(-im * 0.5_dp * dt * (Px + kap * A)**2 / m_eff)
+            this%kprop_R = exp(-im * 0.5_dp * dt * (PR + lam * A)**2 / m_red)
+
+            ! Split-operator on x coordinate (per PR row)
+            do i = 1, NR
+                ! half-step Coulomb
+                this%psi1d_x_in(1:Nx) = this%psi_out_acc(i, 1:Nx) * this%vprop_coul_halfR(1:Nx)
+                ! FFT x -> Px
+                call fftw_execute_dft(this%planFx, this%psi1d_x_in, this%psi1d_x_out)
+                ! apply kinetic + normalize forward FFT
+                this%psi1d_x_in(1:Nx) = this%psi1d_x_out(1:Nx) * this%kprop_R(i) &
+                    & * this%kprop_x(1:Nx) / sqrt_Nx
+                ! iFFT Px -> x
+                call fftw_execute_dft(this%planBx, this%psi1d_x_in, this%psi1d_x_out)
+                this%psi1d_x_in(1:Nx) = this%psi1d_x_out(1:Nx) / sqrt_Nx
+                ! half-step Coulomb
+                this%psi_out_acc(i, 1:Nx) = this%psi1d_x_in(1:Nx) * this%vprop_coul_halfR(1:Nx)
+            end do
+        end select
 
         ! Harvest the large-|x| flux (ionization-after-dissociation) BEFORE applying abs_x
         if (present(flux_out)) then
@@ -621,6 +870,9 @@ contains
         if (allocated(this%kprop_x))          deallocate(this%kprop_x)
         if (allocated(this%kprop_R))          deallocate(this%kprop_R)
         if (allocated(this%vprop_coul_halfR)) deallocate(this%vprop_coul_halfR)
+        if (allocated(this%pot_bx))           deallocate(this%pot_bx)
+        if (allocated(this%kin_R))            deallocate(this%kin_R)
+        if (allocated(this%kin_x))            deallocate(this%kin_x)
         if (allocated(this%psi_out_acc))      deallocate(this%psi_out_acc)
         if (allocated(this%psi_out_new))      deallocate(this%psi_out_new)
 
@@ -669,6 +921,11 @@ contains
     end subroutine free_accum
 
     !> Field-only propagation (kinetic phases only, no Coulomb potential).
+    !! In the (PR,Px) representation the Hamiltonian
+    !!   H(A) = (PR+lam*A)²/(2*m_red) + (Px+kap*A)²/(2*m_eff)
+    !! is purely diagonal, so this exponential is the *exact* solution of the
+    !! sub-step. No RK4 variant is provided: RK4 would only add O(dt⁵) error
+    !! (and break norm conservation) without any accuracy gain.
     subroutine free_propagate(this, A)
         use global_vars, only: dt, m_eff, m_red, Px, PR, kap, lam
         use data_au, only: im
@@ -714,15 +971,26 @@ contains
     !===========================================================================
 
     !> Initialize all sub-propagators.
-    subroutine cont2d_init(this, ix_absorber, iR_absorber, abs_x, abs_R, gauge)
+    !! `propagator` selects the continuum evolution scheme and is normally the
+    !! main propagator name ("split_operator" | "rk4"), so that the continuum
+    !! channels are integrated with the same scheme as the bound wave packet.
+    subroutine cont2d_init(this, ix_absorber, iR_absorber, abs_x, abs_R, gauge, propagator)
         use global_vars, only: NR, Nx
         class(continuum_2d_type), intent(inout) :: this
         integer,  intent(in) :: ix_absorber, iR_absorber
         complex(dp), intent(in) :: abs_x(:), abs_R(:)
         character(*), intent(in) :: gauge
+        character(*), intent(in), optional :: propagator
 
-        call this%ion%initialize(ix_absorber, iR_absorber, abs_x, abs_R, gauge)
-        call this%diss%initialize(ix_absorber, iR_absorber, abs_x, abs_R, gauge)
+        character(20) :: prop_local
+
+        prop_local = "split_operator"
+        if (present(propagator)) then
+            if (trim(adjustl(propagator)) == "rk4") prop_local = "rk4"
+        end if
+
+        call this%ion%initialize(ix_absorber, iR_absorber, abs_x, abs_R, gauge, prop_local)
+        call this%diss%initialize(ix_absorber, iR_absorber, abs_x, abs_R, gauge, prop_local)
         call this%diss_after_ion%initialize(NR, Nx, gauge, "dissociation-after-ionization")
         call this%ion_after_diss%initialize(NR, Nx, gauge, "ionization-after-dissociation")
 
@@ -821,16 +1089,26 @@ contains
 
     !> Propagate all accumulated continuum channels and transfer the
     !! cross-channel fluxes (diss-after-ion and ion-after-diss).
-    subroutine cont2d_propagate(this, A)
+    !! A_half / A_next (vector potential at t+dt/2 and t+dt) are only used by
+    !! the RK4 evolution mode; when absent they default to A.
+    subroutine cont2d_propagate(this, A, A_half, A_next)
         class(continuum_2d_type), intent(inout) :: this
         real(dp), intent(in) :: A
+        real(dp), intent(in), optional :: A_half, A_next
+
+        real(dp) :: Ah, An
+
+        Ah = A
+        An = A
+        if (present(A_half)) Ah = A_half
+        if (present(A_next)) An = A_next
 
         ! 1. Ionization channel; harvest its large-R flux into diss-after-ion
-        call this%ion%propagate(A, this%flux)
+        call this%ion%propagate(A, Ah, An, flux_out=this%flux)
         call this%diss_after_ion%accumulate(this%flux)
 
         ! 2. Pure dissociation channel; harvest its large-|x| flux into ion-after-diss
-        call this%diss%propagate(A, this%flux)
+        call this%diss%propagate(A, Ah, An, flux_out=this%flux)
         call this%ion_after_diss%accumulate(this%flux)
 
         ! 3. Field-only propagation of the two doubly-continuum channels

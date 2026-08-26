@@ -355,7 +355,8 @@ contains
         allocate(vib_pop(guess_vstates,Nstates))
 
         ! Initialize continuum/absorber (always needed regardless of propagator)
-        call continuum_1d%initialize()
+        ! The absorbed packet is evolved with the same scheme as the main propagation.
+        call continuum_1d%initialize(propagator_method)
 
         ! Determine gauge: use input parameter, default to "length"
         gauge_local = trim(adjustl(gauge_2d))
