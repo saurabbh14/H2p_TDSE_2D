@@ -72,20 +72,23 @@ contains
     end subroutine
 
     !> Generate kinetic propagators for half and full time steps
+    !! Kinetic energy: pR²/(2*m_red) + px²/(2*m_eff), with m_eff the effective
+    !! electron mass (m1+m2)/(m1+m2+1) of the (R, x) coordinate system.
     subroutine kprop_gen_len(this)
-        use global_vars, only: Nx, dt, m_red, PR, px
+        use global_vars, only: Nx, dt, m_red, m_eff, PR, px
         use data_au, only: im
         class(split_operator_2d_type), intent(inout) :: this
         integer:: j
         
         do j = 1, Nx
-            this%kprop_full(:,j) = exp(-im * dt * (pR(:) * pR(:) / (2._dp*m_red) + 0.5_dp * px(j) * px(j))) 
+            this%kprop_full(:,j) = exp(-im * dt * (pR(:) * pR(:) / (2._dp*m_red) &
+                & + px(j) * px(j) / (2._dp*m_eff))) 
         end do
          
     end subroutine kprop_gen_len
 
     subroutine kprop_gen_vel(this, A)
-        use global_vars, only: Nx, dt, m_red, PR, px, lam, kap, x, R
+        use global_vars, only: Nx, dt, m_red, m_eff, PR, px, lam, kap, x, R
         use data_au, only: im
         class(split_operator_2d_type), intent(inout) :: this
         integer :: j
@@ -93,7 +96,7 @@ contains
         
         do j = 1, Nx
             this%kprop_full(:,j) = exp(-im * dt * ((pR(:) + lam * A)**2  / (2._dp*m_red) &
-                & + 0.5_dp * (px(j) + kap * A)**2)) 
+                & + (px(j) + kap * A)**2 / (2._dp*m_eff))) 
             this%gauge_transform(:,j) = exp(im * A * (x(j) + R(:)))
         end do
          

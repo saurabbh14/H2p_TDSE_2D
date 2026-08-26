@@ -9,9 +9,9 @@ module rk4_operator_2d_mod
     !! Handles kinetic operator via 2D FFT, and provides RHS evaluation for RK4 stepping
     type :: rk4_operator_2d_type
         character(20) :: gauge ! Gauge Type: "length" or "velocity"
-        ! Kinetic energy factor in momentum space: pR²/(2*m_red) + 0.5*px²
+        ! Kinetic energy factor in momentum space: pR²/(2*m_red) + px²/(2*m_eff)
         real(dp), allocatable :: kin_energy(:,:)
-        ! Shifted kinetic energy (velocity gauge only): (pR+lam*A)²/(2*m_red) + 0.5*(px+kap*A)²
+        ! Shifted kinetic energy (velocity gauge only): (pR+lam*A)²/(2*m_red) + (px+kap*A)²/(2*m_eff)
         real(dp), allocatable :: kin_shifted(:,:)
         ! FFTW plan and memory pointers
         type(C_PTR) :: planF, planB, p_in, p_out
@@ -62,14 +62,16 @@ contains
 
     end subroutine fft_initialize
 
-    !> Pre-compute kinetic energy: pR²/(2*m_red) + 0.5*px²
+    !> Pre-compute kinetic energy: pR²/(2*m_red) + px²/(2*m_eff)
+    !! m_eff = (m1+m2)/(m1+m2+1) is the effective electron mass of the (R,x) system.
     subroutine kin_energy_gen(this)
-        use global_vars, only: NR, Nx, pR, px, m_red
+        use global_vars, only: Nx, pR, px, m_red, m_eff
         class(rk4_operator_2d_type), intent(inout) :: this
         integer :: j
 
         do j = 1, Nx
-            this%kin_energy(:, j) = pR(:) * pR(:) / (2._dp * m_red) + 0.5_dp * px(j) * px(j)
+            this%kin_energy(:, j) = pR(:) * pR(:) / (2._dp * m_red) &
+                & + px(j) * px(j) / (2._dp * m_eff)
         end do
 
     end subroutine kin_energy_gen
@@ -80,7 +82,7 @@ contains
     !! V includes the 2D potential and the dipole-field interaction
     !! Supports both "length" and "velocity" gauge
     subroutine rhs_2d(this, psi, psi_rhs, E_field, A_field, pot)
-        use global_vars, only: NR, Nx, kap, lam, R, x, pR, px, m_red
+        use global_vars, only: NR, Nx, kap, lam, R, x, pR, px, m_red, m_eff
         use data_au, only: im
         use FFTW3
         class(rk4_operator_2d_type), intent(inout) :: this
@@ -107,10 +109,10 @@ contains
             this%psi_in = this%psi_out * this%kin_energy
         case("velocity")
             ! Compute shifted kinetic energy on the fly:
-            ! (pR + lam*A)²/(2*m_red) + 0.5*(px + kap*A)²
+            ! (pR + lam*A)²/(2*m_red) + (px + kap*A)²/(2*m_eff)
             do j = 1, Nx
                 this%kin_shifted(:, j) = (pR(:) + lam * A_field)**2 / (2._dp * m_red) &
-                    & + 0.5_dp * (px(j) + kap * A_field)**2
+                    & + (px(j) + kap * A_field)**2 / (2._dp * m_eff)
             end do
             this%psi_in = this%psi_out * this%kin_shifted
         end select

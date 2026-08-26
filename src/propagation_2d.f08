@@ -66,6 +66,7 @@ module propagation2d_mod
         integer :: abs_R_tk, abs_x_tk
         integer :: psi_outR_norm_2d_tk, psi_outR_Pdens_2d_tk
         integer :: ion_yield_2d_tk
+        integer :: diss_yield_2d_tk, diss_after_ion_yield_2d_tk, ion_after_diss_yield_2d_tk
         ! KH-frame output files (for KH_td mode)
         integer :: dens_x_kh_tk, dens_R_kh_tk
         integer :: avgx_kh_2d_tk, avgR_kh_2d_tk
@@ -357,6 +358,18 @@ contains
         ! time dependent ionization yield
         write(filepath, '(a,a)') adjustl(trim(time_prop_dir_2d)), "ionization_yield_2d.out"
         open(newunit=this%ion_yield_2d_tk,file=filepath,status='unknown')
+
+        ! time dependent dissociation yield
+        write(filepath, '(a,a)') adjustl(trim(time_prop_dir_2d)), "dissociation_yield_2d.out"
+        open(newunit=this%diss_yield_2d_tk,file=filepath,status='unknown')
+
+        ! time dependent dissociation-after-ionization yield
+        write(filepath, '(a,a)') adjustl(trim(time_prop_dir_2d)), "diss_after_ion_yield_2d.out"
+        open(newunit=this%diss_after_ion_yield_2d_tk,file=filepath,status='unknown')
+
+        ! time dependent ionization-after-dissociation yield
+        write(filepath, '(a,a)') adjustl(trim(time_prop_dir_2d)), "ion_after_diss_yield_2d.out"
+        open(newunit=this%ion_after_diss_yield_2d_tk,file=filepath,status='unknown')
         
         ! time dependent momentum density of absorbed wavepacket 
         write(filepath, '(a,a)') adjustl(trim(time_prop_dir_2d)), "psi_outR_momt_density_2d_pm3d.out"
@@ -397,17 +410,17 @@ contains
         integer :: max_num_threads
         real(dp) :: evR, evx, velx, accx, epx, epR
         real(dp) :: norm, ionization_yield
+        real(dp) :: dissociation_yield, diss_after_ion_yield, ion_after_diss_yield
         real(dp) :: E(Nt), A(Nt)
         real(dp) :: alpha_t(Nt)
         real(dp) :: E_half, A_half       ! fields at t + dt/2 for RK4
+        real(dp) :: E_next, A_next       ! fields at t + dt   for RK4
         real(dp) :: alpha_half           ! quiver disp at t + dt/2 for RK4-KH
+        real(dp) :: alpha_next           ! quiver disp at t + dt   for RK4-KH
         real(dp), allocatable :: pot_kh(:,:), pot_kh_half(:,:), pot_kh_next(:,:)
         real(dp) :: E_zero, A_zero       ! zero fields for KH mode
         character(*), intent(in) :: propagator_method
         character(20) :: in_xR, out_x, out_R, out_xR
-        complex(dp), allocatable :: psi_out_R_tmp(:,:)
-
-        allocate(psi_out_R_tmp(NR,Nx))
 
         ! Initialize propagator based on selected method and gauge
         select case(trim(adjustl(propagator_method)))
@@ -431,9 +444,14 @@ contains
             end if
         end select
 
-        ! Initialize continuum 2D ionization propagator
-        call continuum_2d%initialize(Nx - this%i_cpmx, NR - this%i_cpmR, this%abs_x, this%abs_R, gauge_2d)
+        ! Initialize continuum 2D propagators (ionization + dissociation channels)
+        ! The continuum channels follow the main propagator (split-operator / RK4).
+        call continuum_2d%initialize(Nx - this%i_cpmx, NR - this%i_cpmR, this%abs_x, this%abs_R, &
+            & gauge_2d, propagator_method)
         call continuum_2d%ionization_enable()
+        call continuum_2d%dissociation_enable()
+        call continuum_2d%diss_after_ion_enable()
+        call continuum_2d%ion_after_diss_enable()
 
         ! Initial wavefunction gauge transformation for velocity gauge
         if (trim(adjustl(gauge_2d)) == "velocity") then
@@ -485,6 +503,20 @@ contains
             epR = 0.d0
             epx = 0.d0
 
+            ! Fields at t + dt/2 and t + dt, shared by the main RK4 step and the
+            ! RK4 evolution of the continuum channels.
+            if (k < Nt) then
+                E_half = 0.5_dp * (E(k) + E(k+1))
+                A_half = 0.5_dp * (A(k) + A(k+1))
+                E_next = E(k+1)
+                A_next = A(k+1)
+            else
+                E_half = E(k)
+                A_half = A(k)
+                E_next = E(k)
+                A_next = A(k)
+            end if
+
             !====================================================================
             ! KH time-dependent mode: compute instantaneous KH potential
             !====================================================================
@@ -498,11 +530,13 @@ contains
                     call build_kh_potential_at_time(pot_kh, alpha_t(k))
                     if (k < Nt) then
                         alpha_half = 0.5_dp * (alpha_t(k) + alpha_t(k+1))
+                        alpha_next = alpha_t(k+1)
                     else
                         alpha_half = alpha_t(k)
+                        alpha_next = alpha_t(k)
                     end if
                     call build_kh_potential_at_time(pot_kh_half, alpha_half)
-                    call build_kh_potential_at_time(pot_kh_next, alpha_t(k+1))
+                    call build_kh_potential_at_time(pot_kh_next, alpha_next)
                     call rk4_operator_2d%rk4_step_kh(this%psi, dt, pot_kh, pot_kh_half, pot_kh_next)
                 case default
                     call build_kh_potential_at_time(pot_kh, alpha_t(k))
@@ -531,19 +565,10 @@ contains
                 !=============================================================
                 case("rk4")
                 !=============================================================
-                    ! Compute fields at halftime: E(t+dt/2), A(t+dt/2)
-                    ! and next step: E(t+dt), A(t+dt) for the k4 evaluation
-                    if (k < Nt) then
-                        E_half = 0.5_dp * (E(k) + E(k+1))
-                        A_half = 0.5_dp * (A(k) + A(k+1))
-                        call rk4_operator_2d%rk4_step(this%psi, dt, E(k), E_half, E(k+1), &
-                            & A(k), A_half, A(k+1), pot)
-                    else
-                        E_half = E(k)
-                        A_half = A(k)
-                        call rk4_operator_2d%rk4_step(this%psi, dt, E(k), E_half, E(k), &
-                            & A(k), A_half, A(k), pot)
-                    end if
+                    ! k1 uses E(t), A(t); k2/k3 use the half-step fields;
+                    ! k4 uses the next-step fields (all computed above).
+                    call rk4_operator_2d%rk4_step(this%psi, dt, E(k), E_half, E_next, &
+                        & A(k), A_half, A_next, pot)
 
                 !=============================================================
                 case default
@@ -627,18 +652,23 @@ contains
                     call wavefunction_density_snapshot(this%psi, time(k))
             end if
 
-            ! absorbed wavepacket — ionization: extract before masking
+            ! absorbed wavepackets — extract before masking
             call continuum_2d%ionization_extract(this%psi, A(k))
+            call continuum_2d%dissociation_extract(this%psi, A(k))
 
-            ! Propagate accumulated ionized wavefunction + write yield
-            call continuum_2d%ionization_propagate(A(k))
+            ! Propagate all accumulated continuum channels (incl. cross-channel flux)
+            ! A_half / A_next are only used when the continuum runs in RK4 mode.
+            call continuum_2d%propagate(A(k), A_half, A_next)
+
+            ! Write the channel yields
             call continuum_2d%ionization_yield(ionization_yield)
+            call continuum_2d%dissociation_yield(dissociation_yield)
+            call continuum_2d%diss_after_ion_yield(diss_after_ion_yield)
+            call continuum_2d%ion_after_diss_yield(ion_after_diss_yield)
             write(this%ion_yield_2d_tk, '(2E20.10)') time(k) * au2fs, ionization_yield
-
-            ! localization and dissociation
-            do j = 1, Nx
-                psi_out_R_tmp(:,j) = this%psi(:,j) * (1.0d0 - this%abs_R(:)) ! dissociating wavefunction
-            end do
+            write(this%diss_yield_2d_tk, '(2E20.10)') time(k) * au2fs, dissociation_yield
+            write(this%diss_after_ion_yield_2d_tk, '(2E20.10)') time(k) * au2fs, diss_after_ion_yield
+            write(this%ion_after_diss_yield_2d_tk, '(2E20.10)') time(k) * au2fs, ion_after_diss_yield
 
             ! x- & R-absorber mask
             do j = 1, Nx
@@ -650,7 +680,6 @@ contains
 
         end do timeloop
 
-        deallocate(psi_out_R_tmp)
         if (allocated(pot_kh)) deallocate(pot_kh)
         if (allocated(pot_kh_half)) deallocate(pot_kh_half)
         if (allocated(pot_kh_next)) deallocate(pot_kh_next)
@@ -658,6 +687,9 @@ contains
         ! Finalize continuum 2D propagator
         call continuum_2d%finalize()
         close(this%ion_yield_2d_tk)
+        close(this%diss_yield_2d_tk)
+        close(this%diss_after_ion_yield_2d_tk)
+        close(this%ion_after_diss_yield_2d_tk)
         close(this%avgR_2d_tk)
         close(this%avgx_2d_tk)
         close(this%norm_2d_tk)

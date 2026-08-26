@@ -23,6 +23,12 @@ A Fortran-based code for solving the time-dependent Schrödinger equation (TDSE)
 ### Propagation Methods
 - **Split-Operator** (Strang splitting) — 2nd-order symplectic integrator
 - **4th-order Runge-Kutta (RK4)** — Higher-order explicit integrator
+- The **continuum channels follow the main propagator**: with `propagator = "rk4"`
+  the absorbed wave packets are evolved with RK4 as well (2D ionization and
+  dissociation channels, 1D absorbed packet), so the bound and continuum parts
+  carry the same integrator error. Channels whose Hamiltonian is purely diagonal
+  in momentum space (dissociation-after-ionization and ionization-after-dissociation
+  in 2D) keep their exact analytic phase in both modes.
 
 ### Laser Pulse Models
 - **Envelope shapes**: cos², Gaussian, trapezoidal (with configurable rise time), and CW (continuous wave)
@@ -54,6 +60,8 @@ A Fortran-based code for solving the time-dependent Schrödinger equation (TDSE)
 - Localized-state population analysis (gerade/ungerade)
 - Vibrational population analysis on each electronic surface
 - Kinetic Energy Release (KER) spectra
+- Continuum-channel yield analysis (ionization, dissociation,
+  dissociation-after-ionization, ionization-after-dissociation)
 - Momentum spectra for continuum/dissociated wavepackets
 - Absorbed wavepacket tracking and analysis
 - Electric field and vector potential time-histories
@@ -239,7 +247,7 @@ The input file is organized into **scalar sections** (`[section]`) and **array-o
 
 | Key | Type | Description |
 |-----|------|-------------|
-| `propagator` | string | `"split_operator"` or `"rk4"` |
+| `propagator` | string | `"split_operator"` or `"rk4"` — also selects the evolution scheme of the continuum channels |
 | `gauge` | string | `"length"` or `"velocity"` |
 | `total_trans_off` | int | Number of transitions to switch off |
 | `trans_off` | string | Space-separated transition pairs (e.g., `"12 23"`) |
@@ -343,6 +351,10 @@ All output is written to the specified output directory, organized into subdirec
         ├── norm_2d.out          # Wavefunction norm vs. time
         ├── avgR_2d.out          # Expectation value ⟨R⟩(t)
         ├── avgx_2d.out          # Expectation value ⟨x⟩(t)
+        ├── ionization_yield_2d.out      # Ionization yield vs. time
+        ├── dissociation_yield_2d.out    # Pure dissociation yield vs. time
+        ├── diss_after_ion_yield_2d.out  # Dissociation-after-ionization yield
+        ├── ion_after_diss_yield_2d.out  # Ionization-after-dissociation yield
         ├── td-density_R.out     # Time-dependent R density map
         ├── td-density_x.out     # Time-dependent x density map
         └── field_2d.out         # Electric field & vector potential
