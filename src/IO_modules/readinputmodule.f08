@@ -97,6 +97,10 @@ contains
         snapshots_enabled = (trim(buf) == "true" .or. trim(buf) == "1")
         snapshot_frames   = cfg%get_int    ("snapshots", "num_frames", 50)
 
+        ! ----- restart (final wavefunction dump) -----
+        buf               = cfg%get_string("restart", "save", "false")
+        save_final_wf     = (trim(buf) == "true" .or. trim(buf) == "1")
+
         ! ----- output.td_density -----
         td_density_points = cfg%get_int("output.td_density", "num_points", 250)
 

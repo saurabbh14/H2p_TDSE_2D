@@ -1,7 +1,8 @@
 module output_dir_mod
     use global_vars, only: output_data_dir, pulse_data_dir, &
         & nucl_wf_dir, time_prop_dir, time_prop_dir_1d, time_prop_dir_2d, &
-        & time_prop_dir_2d_snapshot, adiabatic_dir, snapshots_enabled
+        & time_prop_dir_2d_snapshot, adiabatic_dir, snapshots_enabled, &
+        & time_prop_dir_2d_wf_bin, save_final_wf
     implicit none
 
 contains
@@ -40,6 +41,11 @@ contains
             write(time_prop_dir_2d_snapshot, '(a,a)') adjustl(trim(time_prop_dir_2d)), 'snapshots/'
             print*, "2d density snapshot output directory ", trim(time_prop_dir_2d_snapshot)
             call execute_command_line("mkdir -p " // adjustl(trim(time_prop_dir_2d_snapshot)))
+        end if
+        if (save_final_wf) then
+            write(time_prop_dir_2d_wf_bin, '(a,a)') adjustl(trim(time_prop_dir_2d)), 'wf_bin/'
+            print*, "2d wavefunction binary output directory ", trim(time_prop_dir_2d_wf_bin)
+            call execute_command_line("mkdir -p " // adjustl(trim(time_prop_dir_2d_wf_bin)))
         end if
 
         ! Output directory for adiabatic electronic wavefunction data

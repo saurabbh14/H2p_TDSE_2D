@@ -7,6 +7,20 @@ All notable changes to the TDSE-2D solver will be documented in this file.
 ## [Unreleased]
 
 ### Added
+- **Final-wavefunction dump for restarts** — new `[restart] save` switch
+  (default `false`) writes the wave functions at the end of the 2D propagation
+  as raw `unformatted`/`access='stream'` binaries into the 2D time-propagation
+  output directory, so that the time evolution can be continued later. Five
+  files are written, each starting with an `NR, Nx` integer header (same
+  convention as `ewf.bin`) followed by the `complex(dp)` array:
+  `psi_final.bin` (main packet, `(R,x)`), `psi_ion_final.bin` (`(R,Px)`),
+  `psi_diss_final.bin` (`(PR,x)`), `psi_diss_after_ion_final.bin` and
+  `psi_ion_after_diss_final.bin` (both `(PR,Px)`). The channels are stored
+  exactly in the representation in which they are propagated, so no transform
+  must be applied when reading them back; the main packet is dumped *after* the
+  last absorber mask, so bound and channel norms remain consistent. The dump
+  happens before `continuum_2d%finalize()`. Only writing is implemented — there
+  is no read/restart path yet.
 - **RK4 evolution mode for the continuum channels** — the absorbed wave packets
   are now integrated with the *same* scheme as the bound wave packet: setting
   `[methods] propagator = "rk4"` switches the 2D ionization and dissociation

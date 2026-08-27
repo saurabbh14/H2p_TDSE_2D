@@ -3,7 +3,7 @@ module propagation2d_mod
     use varprecision, only: dp
     use global_vars, only: Nt, Nx, NR, Nstates, guess_vstates, &
         & R, x, dR, dx, dt, m_eff, m_red, pR, Px, kap, lam, time, gauge_2d, &
-        & snapshots_enabled, snapshot_frames, &
+        & snapshots_enabled, snapshot_frames, save_final_wf, &
         & td_density_points, output_R_stride, output_x_stride, &
         & output_R_start, output_R_end, output_x_start, output_x_end
     use data_au, only: au2eV, im
@@ -684,6 +684,15 @@ contains
         if (allocated(pot_kh_half)) deallocate(pot_kh_half)
         if (allocated(pot_kh_next)) deallocate(pot_kh_next)
 
+        ! Optional dump of the final wavefunctions (main packet + continuum
+        ! channels) as raw binaries, so the time evolution can be continued.
+        ! Must be done BEFORE continuum_2d%finalize(), which deallocates the
+        ! accumulated channel wavefunctions.
+        if (save_final_wf) call write_final_wavefunctions(this%psi, &
+            & continuum_2d%ion%psi_out_acc, continuum_2d%diss%psi_out_acc, &
+            & continuum_2d%diss_after_ion%psi_out_acc, &
+            & continuum_2d%ion_after_diss%psi_out_acc)
+
         ! Finalize continuum 2D propagator
         call continuum_2d%finalize()
         close(this%ion_yield_2d_tk)
@@ -717,6 +726,48 @@ contains
             call split_operator_2d%finalize()
         end select
     end subroutine time_evolution
+
+    !_________________________________________________________
+    !> Write one complex 2D wavefunction to an unformatted stream binary in the
+    !! 2D time-propagation output directory.  The (NR, Nx) header allows a
+    !! grid-compatibility check when the file is read back to continue the
+    !! time evolution.
+    subroutine write_wf_binary(psi, fname)
+        use global_vars, only: time_prop_dir_2d_wf_bin
+        complex(dp), intent(in)  :: psi(:,:)
+        character(*), intent(in) :: fname
+        integer :: fd
+        character(500) :: fn
+
+        write(fn, '(a,a)') adjustl(trim(time_prop_dir_2d_wf_bin)), trim(fname)
+        open(newunit=fd, file=trim(fn), status='replace', form='unformatted', access='stream')
+        write(fd) NR, Nx
+        write(fd) psi
+        close(fd)
+        print*, "saved: ", trim(fn)
+    end subroutine write_wf_binary
+
+    !> Dump the final main wave packet and all four accumulated continuum
+    !! channels as separate binaries.  Note the mixed representations: the
+    !! channel wavefunctions are stored exactly as they are propagated, i.e.
+    !! with the escaped coordinate(s) in momentum space, so no transform must
+    !! be applied when they are read back.
+    subroutine write_final_wavefunctions(psi, psi_ion, psi_diss, psi_dai, psi_iad)
+        complex(dp), intent(in) :: psi(:,:)      ! main packet          (R , x )
+        complex(dp), intent(in) :: psi_ion(:,:)  ! ionization           (R , Px)
+        complex(dp), intent(in) :: psi_diss(:,:) ! dissociation         (PR, x )
+        complex(dp), intent(in) :: psi_dai(:,:)  ! diss-after-ion       (PR, Px)
+        complex(dp), intent(in) :: psi_iad(:,:)  ! ion-after-diss       (PR, Px)
+
+        print*
+        print*, "Saving final 2D wavefunctions as binaries ..."
+        call write_wf_binary(psi,      "psi_final.bin")
+        call write_wf_binary(psi_ion,  "psi_ion_final.bin")
+        call write_wf_binary(psi_diss, "psi_diss_final.bin")
+        call write_wf_binary(psi_dai,  "psi_diss_after_ion_final.bin")
+        call write_wf_binary(psi_iad,  "psi_ion_after_diss_final.bin")
+        print*, "Done."
+    end subroutine write_final_wavefunctions
 
     !_________________________________________________________
 

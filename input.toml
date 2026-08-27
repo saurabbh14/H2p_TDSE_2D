@@ -57,6 +57,17 @@ x_pos = 15.0     # absorber position from the end of the x-grid (a.u.)
 enabled = false       # whether to write 2D wavefunction density snapshots
 num_frames = 50       # total number of frames evenly distributed across propagation
 
+# Final wavefunctions written as raw binaries at the end of the 2D propagation,
+# so that the time evolution can be continued later.  Five files are written to
+# the 2D time-propagation output directory, each with an (NR, Nx) header:
+#   psi_final.bin                  main wave packet            (R , x )
+#   psi_ion_final.bin              ionization channel          (R , Px)
+#   psi_diss_final.bin             dissociation channel        (PR, x )
+#   psi_diss_after_ion_final.bin   dissociation-after-ion.     (PR, Px)
+#   psi_ion_after_diss_final.bin   ionization-after-diss.      (PR, Px)
+[restart]
+save = false          # write the final wavefunctions (main + continuum) as binaries
+
 [output.td_density]
 num_points = 250      # number of time points for td-density_R.out and td-density_x.out
 

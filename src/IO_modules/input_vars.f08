@@ -78,6 +78,9 @@ module InputVars
     logical :: snapshots_enabled = .false.   ! whether to write 2D density snapshots
     integer :: snapshot_frames = 50          ! total number of frames across propagation
 
+    ! Final-wavefunction dump (restart files)
+    logical :: save_final_wf = .false.       ! write final 2D wavefunctions as binaries
+
     ! Time-dependent density output controls
     integer :: td_density_points = 250       ! number of time points in td density output
 
