@@ -7,5 +7,6 @@ processes_sources = files(
     'continuum_2d.f08',
     'initializer.f08', 
     'setpot.f08',
+    'itp_2d.f08',
     'pulse_gen.f08'
     )

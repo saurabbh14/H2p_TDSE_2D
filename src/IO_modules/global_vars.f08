@@ -7,6 +7,8 @@ module global_vars
     real(dp), allocatable :: PR(:), Px(:)       ! momentum grid
     real(dp), allocatable :: Pot(:,:), ewf(:,:,:) !2D potential and electronic wavefunction
     real(dp), allocatable :: chi0(:,:,:)        !1D vibrational potential and wavefunctions
+    complex(dp), allocatable :: psi_itp_2d(:,:,:) ! full-2D ITP eigenstates (R, x, state)
+    real(dp), allocatable :: E_itp_2d(:)        ! full-2D ITP eigenenergies (a.u.)
     real(dp), allocatable, dimension(:,:,:) :: mu_all ! transition dipole arrays
     real(dp), allocatable, dimension(:,:) :: adb ! adiabatic BO potentials
     real(dp), allocatable :: vib_en(:,:)        ! vibrational energies for all states
@@ -19,6 +21,7 @@ module global_vars
     character(len=2000) :: pulse_data_dir   ! output directory path for pulse data
     character(len=2000) :: adiabatic_dir   ! output directory path for adiabatic (electronic wavefunction) data
     character(len=2000) :: nucl_wf_dir      ! output directory path for nuclear wavefunction data
+    character(len=2000) :: itp_2d_dir       ! output directory path for full-2D ITP eigenstate data
     character(len=2000) :: time_prop_dir    ! output directory path for time propagation data
     character(len=2000) :: time_prop_dir_1d    ! output directory path for 1d time propagation data
     character(len=2000) :: time_prop_dir_2d    ! output directory path for 2d time propagation data 

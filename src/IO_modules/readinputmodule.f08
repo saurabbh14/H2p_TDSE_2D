@@ -64,8 +64,23 @@ contains
         initial_distribution = trim(buf)
         N_ini      = cfg%get_int  ("initial_state", "N_ini",      1)
         v_ini      = cfg%get_int  ("initial_state", "v_ini",      1)
+        N_itp_ini  = cfg%get_int  ("initial_state", "itp_state",  1)
         RI_tdse    = cfg%get_real ("initial_state", "RI_tdse",    1.5_dp)
         kappa_tdse = cfg%get_real ("initial_state", "kappa_tdse",-5.0_dp)
+
+        ! ----- itp_2d (full-2D imaginary time propagation) -----
+        buf              = cfg%get_string("itp_2d", "enabled",  "false")
+        itp_2d_enabled   = (trim(buf) == "true" .or. trim(buf) == "1")
+        itp_2d_nstates   = cfg%get_int   ("itp_2d", "nstates",   1)
+        itp_2d_max_iter  = cfg%get_int   ("itp_2d", "max_iter",  1000000)
+        itp_2d_thresh    = cfg%get_real  ("itp_2d", "thresh",    1.e-15_dp)
+        itp_2d_dt_scale  = cfg%get_real  ("itp_2d", "dt_scale",  0.1_dp)
+        buf              = cfg%get_string("itp_2d", "guess",     "auto")
+        itp_2d_guess     = trim(buf)
+        buf              = cfg%get_string("itp_2d", "save",      "true")
+        itp_2d_save      = (trim(buf) == "true" .or. trim(buf) == "1")
+        buf              = cfg%get_string("itp_2d", "read",      "true")
+        itp_2d_read      = (trim(buf) == "true" .or. trim(buf) == "1")
 
         ! ----- io -----
         buf              = cfg%get_string("io", "input_data_dir",  "input_data/")
@@ -146,6 +161,27 @@ contains
 
         ! Set default gauge if not specified
         if (gauge_2d == '') gauge_2d = 'length'
+
+        ! The "2d itp" initial distribution requires the 2D ITP eigenstates,
+        ! so enable the 2D ITP stage automatically (and make sure enough
+        ! states are computed for the requested one).
+        if (trim(initial_distribution) == "2d itp") then
+            if (.not. itp_2d_enabled) then
+                print '(a)', " NOTE: [initial_state] distribution = '2d itp' — " &
+                    & //"enabling the [itp_2d] stage automatically."
+                itp_2d_enabled = .true.
+            end if
+            if (N_itp_ini < 1) then
+                print '(a)', " WARNING: [initial_state] itp_state < 1 — using 1."
+                N_itp_ini = 1
+            end if
+            if (N_itp_ini > itp_2d_nstates) then
+                print '(a,i0,a,i0,a)', " NOTE: [initial_state] itp_state = ", N_itp_ini, &
+                    & " exceeds [itp_2d] nstates = ", itp_2d_nstates, &
+                    & " — raising nstates to match."
+                itp_2d_nstates = N_itp_ini
+            end if
+        end if
 
         call cfg%finalise()
     end subroutine read_input_file

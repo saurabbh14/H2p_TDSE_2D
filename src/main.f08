@@ -15,6 +15,7 @@ program TDSE_main
   use initializer, only: setup => initializer_setup   ! subroutine to initialize grids, arrays
   use adiabatic_mod             ! compute adiabatic surfaces via ITP
   use nuclear_wavefkt           ! compute vibrational eigenstates via ITP
+  use itp_2d_mod                ! compute full-2D (R,x) eigenstates via ITP
   use propagation1d_mod         ! 1d time propagation using split operator
   use propagation2d_mod        ! 2d time propagation
   use timeit                    ! timeit for checking elapsed time
@@ -26,6 +27,7 @@ program TDSE_main
   type(pulse_param) :: pulse         ! pulse object with methods (read, init, gen)
   type(adiabatic_wavefkt_class) :: awf_obj ! adiabatic wavefunction
   type(nuclear_wavefkt_class) :: nwf_obj ! nuclear wavefunction object
+  type(itp_2d_type) :: itp2d_obj      ! full-2D ITP eigenstate object
   type(time_prop) :: prop
   type(time_prop_2d) :: prop_2d
   type(timer) :: time_this
@@ -66,6 +68,11 @@ program TDSE_main
   ! Compute vibrational eigenstates via Imaginary Time Propagation (ITP)
   call nwf_obj%nuclear_wf_calc
 
+  ! Optionally compute the eigenstates of the full 2D (R,x) Hamiltonian via ITP.
+  ! These can be used as the initial state of the real-time evolution by setting
+  ! [initial_state] distribution = "2d itp" (and itp_state = <N>).
+  if (itp_2d_enabled) call itp2d_obj%itp_2d_calc()
+
   ! Generate and store pulse(s) then run time propagation
   call pulse%generate()
   print*
@@ -77,6 +84,8 @@ program TDSE_main
 !
   ! Clean up allocated arrays and pulse internals
   deallocate (adb, mu_all, chi0, vib_en)
+  if (allocated(psi_itp_2d)) deallocate(psi_itp_2d)
+  if (allocated(E_itp_2d)) deallocate(E_itp_2d)
   call pulse%deallocate_all()
 
   ! Final timing and report

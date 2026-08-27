@@ -20,6 +20,7 @@ module split_operator_2d_mod
     contains
         procedure :: fft_initialize      ! Initialize FFTW plans and memory
         procedure :: split_operator_initialize ! Initialize memory and functions based on gauge choice
+        procedure :: itp_initialize      ! Initialize memory and imaginary-time propagators (2D ITP)
         procedure :: kprop_gen_len       ! Generate length-guage kinetic propagators 
         procedure :: vprop_gen_len       ! Generate length-guage potential propagators
         procedure :: vprop_gen_kh        ! Generate KH-gauge (time-dep) potential propagators
@@ -30,11 +31,21 @@ module split_operator_2d_mod
     end type split_operator_2d_type
 
 contains
-    !> Initialize FFTW plans and memory for split-operator propagation
-    subroutine fft_initialize(this)
+    !> Initialize FFTW plans and memory for split-operator propagation.
+    !! `parallel` optionally overrides the global `prop_par_FFTW` flag (used by
+    !! the 2D ITP module, which follows the `itp_fftw` input setting instead).
+    subroutine fft_initialize(this, parallel)
         use global_vars, only: NR, Nx, prop_par_FFTW
         use FFTW3
         class(split_operator_2d_type), intent(inout) :: this
+        character(*), intent(in), optional :: parallel
+        character(len=10) :: par_flag
+
+        if (present(parallel)) then
+            par_flag = parallel
+        else
+            par_flag = prop_par_FFTW
+        end if
 
         print*
         print*, "FFTW intialization ..."
@@ -49,7 +60,7 @@ contains
         call fftw_initialize_threads
         print*, "FFTW plan creation ..."
         call fftw_create_c2c_2d_plans(this%psi_in, this%psi_out, NR, Nx, & 
-            & this%planF, this%planB, prop_par_FFTW)
+            & this%planF, this%planB, par_flag)
         print*, "Done setting up FFTW."
 
     end subroutine fft_initialize
@@ -70,6 +81,37 @@ contains
             call this%vprop_gen_vel()
         end select  
     end subroutine
+
+    !> Initialize memory and the *imaginary-time* propagators used by the 2D ITP.
+    !! Instead of the real-time factors exp(-i dt H) this builds
+    !!   kprop_full = exp(-dt_itp * (pR^2/(2 m_red) + px^2/(2 m_eff)))
+    !!   vprop      = exp(-0.5 * dt_itp * pot)
+    !! so that `split_operator_step(psi, "inner-xR")` performs one Strang step
+    !! of imaginary-time propagation without any further changes.
+    !! The field-free (Lab-frame) Hamiltonian is used: the ITP looks for the
+    !! bound eigenstates of the unperturbed system, hence no gauge/laser terms.
+    subroutine itp_initialize(this, dt_itp)
+        use global_vars, only: NR, Nx, m_red, m_eff, pR, px, pot
+        class(split_operator_2d_type), intent(inout) :: this
+        real(dp), intent(in) :: dt_itp
+        integer :: j
+
+        if (.not. allocated(this%kprop_full)) allocate(this%kprop_full(NR,Nx))
+        if (.not. allocated(this%vprop)) allocate(this%vprop(NR,Nx))
+        if (.not. allocated(this%vcol_prop)) allocate(this%vcol_prop(NR))
+        if (.not. allocated(this%gauge_transform)) allocate(this%gauge_transform(NR,Nx))
+
+        do j = 1, Nx
+            this%kprop_full(:,j) = cmplx(exp(-dt_itp * (pR(:)**2 / (2._dp*m_red) &
+                & + px(j)**2 / (2._dp*m_eff))), 0._dp, dp)
+        end do
+        this%vprop = cmplx(exp(-0.5_dp * dt_itp * pot), 0._dp, dp)
+        ! Not used in imaginary time (the 1/R repulsion is already part of pot),
+        ! kept neutral so that any accidental use is a no-op.
+        this%vcol_prop = (1._dp, 0._dp)
+        this%gauge_transform = (1._dp, 0._dp)
+
+    end subroutine itp_initialize
 
     !> Generate kinetic propagators for half and full time steps
     !! Kinetic energy: pR²/(2*m_red) + px²/(2*m_eff), with m_eff the effective

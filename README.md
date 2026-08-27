@@ -20,6 +20,15 @@ A Fortran-based code for solving the time-dependent Schrödinger equation (TDSE)
 - Imaginary Time Propagation (ITP) to compute bound vibrational eigenstates for each electronic surface
 - Configurable number of vibrational states per electronic state
 
+### Full-2D Eigenstates (2D ITP)
+- Optional Imaginary Time Propagation on the **full 2D (R, x) grid** with the
+  complete 2D potential, giving eigenstates of the coupled nuclear + electronic
+  Hamiltonian (no Born-Oppenheimer / product-ansatz approximation)
+- Any number of the lowest eigenstates via Gram-Schmidt orthogonalization
+- Reuses the real-time split-operator kernel with imaginary-time propagators
+- Results can be used directly as the initial state of the real-time evolution
+- Eigenstates/energies are cached on disk and reused on subsequent runs
+
 ### Propagation Methods
 - **Split-Operator** (Strang splitting) — 2nd-order symplectic integrator
 - **4th-order Runge-Kutta (RK4)** — Higher-order explicit integrator
@@ -44,6 +53,7 @@ A Fortran-based code for solving the time-dependent Schrödinger equation (TDSE)
 - Single vibrational eigenstate on a chosen electronic surface
 - Gaussian distribution (centered at specified R with given width)
 - Boltzmann distribution (thermal population of vibrational states)
+- Full-2D ITP eigenstate (`distribution = "2d itp"`)
 
 ### Boundary Conditions
 - **Complex Absorbing Potential (CAP)** — Complex exponential absorber tuned to an optimal momentum
@@ -98,9 +108,10 @@ A Fortran-based code for solving the time-dependent Schrödinger equation (TDSE)
     │   └── varprecision.f08    # Precision definitions
     ├── processes/              # Core physics modules
     │   ├── split_operator.f08      # 1D split-operator propagator
-    │   ├── split_operator_2d.f08   # 2D split-operator propagator
+    │   ├── split_operator_2d.f08   # 2D split-operator propagator (real + imaginary time)
     │   ├── rk4_operator.f08        # 1D RK4 propagator
     │   ├── rk4_operator_2d.f08     # 2D RK4 propagator
+    │   ├── itp_2d.f08              # Full-2D (R,x) eigenstates via imaginary time propagation
     │   ├── pulse_gen.f08           # Laser pulse generation (N-laser support)
     │   ├── setpot.f08              # Potential builder (including KH)
     │   ├── initializer.f08         # Grid and array setup
@@ -228,11 +239,44 @@ The input file is organized into **scalar sections** (`[section]`) and **array-o
 
 | Key | Type | Description |
 |-----|------|-------------|
-| `distribution` | string | `"single_vibrational"`, `"gaussian"`, or `"boltzmann"` |
+| `distribution` | string | `"single vibrational state"`, `"gaussian distribution"`, `"Boltzmann distribution"`, or `"2d itp"` |
 | `N_ini` | int | Initial electronic state index |
 | `v_ini` | int | Initial vibrational state index |
-| `RI_tdse` | float | Gaussian center for TDSE (Å) |
+| `itp_state` | int | 2D ITP eigenstate index (only with `distribution = "2d itp"`) |
+| `RI_tdse` | float | Gaussian center for TDSE (a.u.) |
 | `kappa_tdse` | float | Gaussian std dev for TDSE |
+
+#### `[itp_2d]` — Full-2D Imaginary Time Propagation
+
+Computes eigenstates of the **complete 2D (R, x) Hamiltonian** (nuclear +
+electronic degrees of freedom simultaneously) by imaginary-time propagation.
+The same split-operator kernel as the real-time 2D propagation is reused, but
+with the imaginary-time propagators
+
+```
+kprop = exp(-dt_itp * (pR²/(2·m_red) + px²/(2·m_eff)))
+vprop = exp(-dt_itp/2 · V(R,x))          with   dt_itp = dt_scale · dt
+```
+
+Each state is iterated until the eigenvalue estimate
+`E = -1/(2·dt_itp) · ln(⟨ψ|ψ⟩/⟨ψ_old|ψ_old⟩)` changes by less than `thresh`;
+higher states are kept orthogonal to the converged lower ones by Gram-Schmidt
+projection.
+
+| Key | Type | Default | Description |
+|-----|------|---------|-------------|
+| `enabled` | bool | `false` | Run the 2D ITP stage |
+| `nstates` | int | `1` | Number of (lowest) 2D eigenstates to converge |
+| `guess` | string | `"auto"` | Initial guess: `"gaussian"` (2D Gaussian at the potential minimum), `"ewf"` (adiabatic electronic state × R-Gaussian), or `"auto"` (uses `"ewf"` when adiabatic data are available) |
+| `dt_scale` | float | `0.1` | Imaginary time step as a fraction of `dt` |
+| `thresh` | float | `1.0e-15` | Energy convergence threshold (a.u.) |
+| `max_iter` | int | `1000000` | Maximum iterations per state |
+| `save` | bool | `true` | Write eigenstates/energies to `itp_2d_data/` |
+| `read` | bool | `true` | Reuse existing `itp_2d_data/` files when grid-compatible |
+
+Setting `[initial_state] distribution = "2d itp"` enables this stage
+automatically and raises `nstates` if `itp_state` exceeds it. The Gaussian
+guess width is taken from `[initial_guess] kappa`.
 
 #### `[io]` — Input/Output Paths
 
@@ -339,6 +383,9 @@ All output is written to the specified output directory, organized into subdirec
 <output_data_dir>/
 ├── pulse_data/                  # Laser pulse electric field & vector potential
 ├── nuclear_wavepacket_data/     # Vibrational eigenstates & energies for each electronic state
+├── itp_2d_data/                 # Full-2D ITP eigenstates (only if [itp_2d] enabled)
+│   ├── energies.out             # State index, E (a.u.), E (eV)
+│   └── psi_itp_state_<N>.bin    # complex(dp) (NR,Nx) eigenstate with an (NR,Nx) header
 ├── adiabatic_data/              # Adiabatic electronic wavefunction data
 └── time_prop/
     ├── 1d/                      # 1D propagation output

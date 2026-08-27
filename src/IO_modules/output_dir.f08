@@ -2,7 +2,7 @@ module output_dir_mod
     use global_vars, only: output_data_dir, pulse_data_dir, &
         & nucl_wf_dir, time_prop_dir, time_prop_dir_1d, time_prop_dir_2d, &
         & time_prop_dir_2d_snapshot, adiabatic_dir, snapshots_enabled, &
-        & time_prop_dir_2d_wf_bin, save_final_wf
+        & time_prop_dir_2d_wf_bin, save_final_wf, itp_2d_dir, itp_2d_enabled
     implicit none
 
 contains
@@ -25,6 +25,13 @@ contains
         write(nucl_wf_dir, '(a,a)') adjustl(trim(output_data_dir)), 'nuclear_wavepacket_data/'
         print*, "checking/creating nuclear wavepacket output directory ", trim(nucl_wf_dir)
         call execute_command_line("mkdir -p " // adjustl(trim(nucl_wf_dir)))
+
+        ! Output directory for full-2D ITP eigenstate data
+        if (itp_2d_enabled) then
+            write(itp_2d_dir, '(a,a)') adjustl(trim(output_data_dir)), 'itp_2d_data/'
+            print*, "checking/creating 2D ITP output directory ", trim(itp_2d_dir)
+            call execute_command_line("mkdir -p " // adjustl(trim(itp_2d_dir)))
+        end if
 
         ! Output directory for time propagation
         write(time_prop_dir, '(a,a)') adjustl(trim(output_data_dir)), 'time_prop/'

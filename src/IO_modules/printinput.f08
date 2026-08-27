@@ -44,6 +44,19 @@ module PrintInputVars
         print*, "centered at RI: ", RI_tdse
         print*, "standard deviation: ", kappa_tdse
         print*
+        print*, "Full-2D ITP (eigenstates of the (R,x) Hamiltonian):"
+        print*, "enabled: ", itp_2d_enabled
+        if (itp_2d_enabled) then
+            print'(a,i0)', " number of 2D eigenstates: nstates = ", itp_2d_nstates
+            print*, "initial guess: ", trim(itp_2d_guess)
+            print*, "imaginary time step scale (dt_itp = dt_scale * dt): ", sngl(itp_2d_dt_scale)
+            print*, "convergence threshold: ", sngl(itp_2d_thresh), "a.u."
+            print'(a,i0)', " max iterations per state: ", itp_2d_max_iter
+            print*, "save results: ", itp_2d_save, ", reuse existing results: ", itp_2d_read
+            if (trim(initial_distribution) == "2d itp") &
+                & print'(a,i0)', " 2D ITP state used as TDSE initial state: ", N_itp_ini
+        end if
+        print*
         print*, "FFTW Parallelization:"
         print*, "TDSE Propagation FFTW: ", trim(prop_par_FFTW)
         print*, "ITP FFTW: ", trim(ITP_par_FFTW)

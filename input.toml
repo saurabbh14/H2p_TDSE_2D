@@ -30,11 +30,33 @@ RI    = 0.7      # center of initial Gaussian (a.u.)
 kappa = -5.0     # width of initial Gaussian (negative)
 
 [initial_state]
-distribution = "single vibrational state"  # "single vibrational state" | "gaussian distribution" | "Boltzmann distribution"
+distribution = "single vibrational state"  # "single vibrational state" | "gaussian distribution" | "Boltzmann distribution" | "2d itp"
 N_ini        = 1          # initial electronic state index
 v_ini        = 1          # initial vibrational state index
+itp_state    = 1          # 2D ITP eigenstate index (only used with distribution = "2d itp")
 RI_tdse      = 1.5        # Gaussian center for TDSE (a.u.)
 kappa_tdse   = -5.0       # Gaussian std dev for TDSE
+
+# Full-2D Imaginary Time Propagation — eigenstates of the complete (R, x)
+# Hamiltonian (nuclear + electronic), computed with the same split-operator
+# machinery as the real-time 2D propagation but with the imaginary-time
+# propagators exp(-dt_itp*T) and exp(-dt_itp/2*V).
+# Setting [initial_state] distribution = "2d itp" enables this stage
+# automatically and uses eigenstate `itp_state` as the TDSE initial state.
+# Results are written to <output_data_dir>/itp_2d_data/:
+#   energies.out              state index, E (a.u.), E (eV)
+#   psi_itp_state_<N>.bin     complex(dp) (NR, Nx) array with an (NR, Nx) header
+[itp_2d]
+enabled  = false      # run the full-2D ITP stage
+nstates  = 1          # number of 2D eigenstates to converge (lowest first)
+guess    = "auto"     # "auto" | "gaussian" (2D Gaussian at the potential minimum)
+                      #        | "ewf" (adiabatic electronic state x R-Gaussian)
+                      # "auto" uses "ewf" when adiabatic data are available
+dt_scale = 0.1        # imaginary time step: dt_itp = dt_scale * dt
+thresh   = 1.0e-15    # energy convergence threshold (a.u.)
+max_iter = 1000000    # max iterations per state
+save     = true       # write eigenstates/energies to itp_2d_data/
+read     = true       # reuse existing itp_2d_data/ files when compatible
 
 [io]
 input_data_dir   = "input_data/"

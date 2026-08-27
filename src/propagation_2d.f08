@@ -166,7 +166,8 @@ contains
 
     subroutine ini_dist_choice(this)
         use global_vars, only: NR, v_ini, N_ini, Ri_tdse, kappa_tdse, &
-            & initial_distribution, R, x, chi0, ewf
+            & initial_distribution, R, x, chi0, ewf, &
+            & psi_itp_2d, E_itp_2d, N_itp_ini
         use data_au, only: au2a, au2eV
         class(time_prop_2d), intent(inout) :: this
         character(len=5):: divider
@@ -183,6 +184,24 @@ contains
             do j = 1, Nx
                 this%psi(:,j) = ewf(:,j,N_ini) * chi0(:,v_ini,N_ini)  !   & *exp(im*dpR*(r-ri))
             end do  
+        case("2d itp")
+            ! Eigenstate of the full 2D (R,x) Hamiltonian from the 2D ITP module
+            if (.not. allocated(psi_itp_2d)) then
+                print*, "ERROR: initial_distribution = '2d itp' but no 2D ITP states"
+                print*, "       are available. Enable [itp_2d] in the input file."
+                stop
+            end if
+            if (N_itp_ini < 1 .or. N_itp_ini > size(psi_itp_2d, 3)) then
+                print*, "ERROR: [initial_state] itp_state =", N_itp_ini, &
+                    & "is out of range (available:", size(psi_itp_2d, 3), ")."
+                stop
+            end if
+            print*, "initial wavefunction is the 2D ITP eigenstate no.", N_itp_ini
+            if (allocated(E_itp_2d)) then
+                print*, "with eigenenergy E =", sngl(E_itp_2d(N_itp_ini)), "a.u. =", &
+                    & sngl(E_itp_2d(N_itp_ini) * au2eV), "eV"
+            end if
+            this%psi = psi_itp_2d(:,:,N_itp_ini)
         case("gaussian distribution")
             print*, "initial wavefunction is in..."
             print*, N_ini-1, "electronic state and with a Gaussian distribution centered around",&

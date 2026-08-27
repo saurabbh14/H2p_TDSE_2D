@@ -7,6 +7,41 @@ All notable changes to the TDSE-2D solver will be documented in this file.
 ## [Unreleased]
 
 ### Added
+- **Full-2D Imaginary Time Propagation (`src/processes/itp_2d.f08`)** — a new
+  module (`itp_2d_mod`, type `itp_2d_type`) that computes eigenstates of the
+  *complete* 2D (R, x) Hamiltonian, i.e. nuclear and electronic degrees of
+  freedom simultaneously with the full 2D potential `pot(R,x)`, without any
+  Born-Oppenheimer product ansatz. The module **reuses the real-time
+  split-operator kernel**: `split_operator_2d_type` gained an `itp_initialize`
+  procedure that fills the very same `kprop_full`/`vprop` arrays with the
+  imaginary-time factors
+  `exp(-dt_itp·(pR²/2m_red + px²/2m_eff))` and `exp(-dt_itp/2·V)`, so one
+  `split_operator_step(psi, "inner-xR")` call performs a full Strang step of
+  imaginary-time propagation. Per state the loop is: seed guess → Gram-Schmidt
+  projection against converged states → one ITP step → eigenvalue estimate
+  `E = -1/(2·dt_itp)·ln(⟨ψ|ψ⟩/⟨ψ_old|ψ_old⟩)` → renormalize, until
+  `|E - E_old| ≤ thresh`. Two seeding strategies are available: a plain 2D
+  Gaussian centred at the global minimum of `pot` (`guess = "gaussian"`) and an
+  optionally refined guess `ewf(:,:,N)·exp(kappa·(R-R_eq)²)` built from the
+  adiabatic electronic wavefunctions (`guess = "ewf"`); `guess = "auto"`
+  (default) picks the `ewf` seed whenever adiabatic data are available. The
+  Gaussian width reuses `[initial_guess] kappa`.
+- **`[itp_2d]` input section** — new switch to enable and configure the 2D ITP:
+  `enabled` (default `false`), `nstates`, `guess`, `dt_scale`
+  (`dt_itp = dt_scale·dt`, default `0.1`), `thresh`, `max_iter`, `save`, `read`.
+  Following the `adiabatic_mod` pattern, converged results are cached in
+  `<output_data_dir>/itp_2d_data/` (`energies.out` plus one
+  `psi_itp_state_<N>.bin` per state — `complex(dp)` `(NR,Nx)` arrays with an
+  `NR, Nx` integer header, the same convention as `ewf.bin`/`psi_final.bin`) and
+  reused on subsequent runs when `read = true` and the grid dimensions match.
+- **2D ITP eigenstate as TDSE initial state** — `[initial_state] distribution`
+  accepts the new value `"2d itp"`, which starts the real-time 2D propagation
+  from the eigenstate selected by the new `[initial_state] itp_state` key
+  (1-based). This distribution enables the `[itp_2d]` stage automatically and
+  raises `nstates` if `itp_state` exceeds it, so no inconsistent combination can
+  be requested. Out-of-range or missing states are reported as fatal errors in
+  `ini_dist_choice`.
+
 - **Final-wavefunction dump for restarts** — new `[restart] save` switch
   (default `false`) writes the wave functions at the end of the 2D propagation
   as raw `unformatted`/`access='stream'` binaries into the 2D time-propagation
@@ -50,6 +85,13 @@ All notable changes to the TDSE-2D solver will be documented in this file.
   pulse (with a warning) for a zero-amplitude placeholder pulse.
 
 ### Changed
+- **`split_operator_2d` API** — `fft_initialize` gained an *optional* trailing
+  `parallel` argument that overrides the global `prop_par_FFTW` flag; the 2D ITP
+  module passes `itp_fftw` so that the ITP and the real-time propagation can use
+  different FFTW threading settings. Existing call sites without the argument
+  keep using `prop_par_FFTW`. The type also gained `itp_initialize(dt_itp)`,
+  which fills the existing propagator arrays with imaginary-time factors instead
+  of the real-time ones, so `split_operator_step` is shared by both.
 - **Continuum API** — `continuum_2d%initialize` and `continuum_1d%initialize`
   gained an *optional* trailing `propagator` argument (the main propagator name),
   and `continuum_2d%propagate` gained optional `A_half` / `A_next` arguments

@@ -37,6 +37,16 @@ module InputVars
     ! vibrational states 
     integer:: guess_vstates                ! number of vibrational eigenstates to compute
     integer, allocatable:: Vstates(:)      ! storage for computed vibrational energies
+
+    ! Full-2D Imaginary Time Propagation (ITP) — eigenstates of the (R,x) Hamiltonian
+    logical :: itp_2d_enabled = .false.       ! run the full 2D ITP
+    integer :: itp_2d_nstates = 1             ! number of 2D eigenstates to compute
+    integer :: itp_2d_max_iter = 1000000      ! max ITP iterations per state
+    real(dp) :: itp_2d_thresh = 1.e-15_dp     ! energy convergence threshold (a.u.)
+    real(dp) :: itp_2d_dt_scale = 0.1_dp      ! imaginary time step = dt_scale * dt
+    character(20) :: itp_2d_guess = "auto"    ! "auto" | "gaussian" | "ewf"
+    logical :: itp_2d_save = .true.           ! write the 2D eigenstates to disk
+    logical :: itp_2d_read = .true.           ! reuse existing 2D ITP files if valid
     
     ! time grid 
     integer:: Nt                           ! number of time steps for time propagation
@@ -49,6 +59,7 @@ module InputVars
     
     ! initial TDSE state (how to prepare the initial wavefunction for real-time propagation)
     integer:: N_ini, v_ini                 ! N_ini: electronic state index; v_ini: vibrational quantum number
+    integer:: N_itp_ini = 1                ! 2D ITP eigenstate index used as initial state ("2d itp")
     integer, allocatable:: v_dist_ini(:)   ! optional explicit vibrational-population vector
     real(dp):: temperature, kappa_tdse, RI_tdse ! TDSE initial distribution parameters (a.u.)
     character(2000):: initial_distribution ! string selecting initial distribution type ("single vibrational state", "Boltzmann distribution", etc.)
