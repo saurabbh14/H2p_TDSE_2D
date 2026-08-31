@@ -164,7 +164,7 @@ contains
                 & sc_kind, dp, Rmin, Rmax, dR, zeff, &
                 & alpha2
         use data_au
-        use pot_param, only: morse_potential
+        use pot_param, only: sc_alpha_parameter_func, sc_zeff_parameter_func
 
         character(4000):: filepath
         integer:: I, sc_tk, sc_out_tk
@@ -214,21 +214,38 @@ contains
                 close(sc_out_tk)
  
             case("static")
-                dR = (51.2_dp - 0.1_dp) / (NR-1)
+                dR = (Rmax - Rmin) / (NR-1)
                 do I = 1, NR
-                    R(I) = 0.1_dp + (I-1) * dR
+                    R(I) = Rmin + (I-1) * dR
                 enddo
 
                 alpha2 = 1._dp
                 zeff = 1._dp
                 ! Write generated Morse surface to output 
-                write(filepath,'(a,a)') adjustl(trim(output_data_dir)), "sc_params_read.out"  
+                write(filepath,'(a,a)') adjustl(trim(output_data_dir)), "sc_params.out"  
                 open(newunit=sc_out_tk,file=adjustl(trim(filepath)),status='unknown')
                 do I = 1, NR
                     write(sc_out_tk,*) R(I), zeff(I), alpha2(I) !, sngl(adb(I,2)*au2eV), &
                     ! &sngl(adb(i,3)*au2eV), sngl(adb(i,4)*au2eV), ad
                 end do
                 close(sc_out_tk)
+            
+            case("from_function")
+                dR = (Rmax - Rmin) / (NR-1)
+                do I = 1, NR
+                    R(I) = Rmin + (I-1) * dR
+                    alpha2(I) = sc_alpha_parameter_func(R(I))
+                    zeff(I) = sc_zeff_parameter_func(R(I))
+                enddo
+
+                ! Write generated Morse surface to output 
+                write(filepath,'(a,a)') adjustl(trim(output_data_dir)), "sc_params.out"  
+                open(newunit=sc_out_tk,file=adjustl(trim(filepath)),status='unknown')
+                do I = 1, NR
+                    write(sc_out_tk,*) R(I), zeff(I), alpha2(I) !, sngl(adb(I,2)*au2eV), &
+                    ! &sngl(adb(i,3)*au2eV), sngl(adb(i,4)*au2eV), ad
+                end do
+                close(sc_out_tk)    
         end select
     end subroutine sc_read
 

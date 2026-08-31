@@ -4,10 +4,10 @@
 # wavelengths in nm, phases in units of pi, quiver amplitude in a.u.
 
 [grid]
-R_points  = 512        # number of R-grid points (NR)
+R_points  = 256        # number of R-grid points (NR)
 R_min     = 0.1        # minimum R in a.u.
 R_max     = 51.2       # maximum R in a.u.
-x_points  = 1024       # number of x-grid points (Nx)
+x_points  = 512       # number of x-grid points (Nx)
 x_min     = -102.4     # minimum x in a.u.
 x_max     = 102.4      # maximum x in a.u.
 
@@ -15,7 +15,7 @@ x_max     = 102.4      # maximum x in a.u.
 m1            = 1.0          # mass of nucleus 1 (amu)
 m2            = 1.0          # mass of nucleus 2 (amu)
 Nstates       = 2            # number of electronic BO states
-sc_kind       = "on_grid"    # "on_grid" or "static"
+sc_kind       = "from_function"    # "on_grid" | "static" | "from_function"
 sc_params     = "Z_interpolated_optimized_a2_parameters_with_go.txt"
 bo_pot_kind   = "on_nuclr_grid"  # "on_nuclr_grid" or "Morse"
 CalcMode      = "Lab"        # "Lab", "KH", or "KH_td"
